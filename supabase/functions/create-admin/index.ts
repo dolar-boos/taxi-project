@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
   });
 
   const email = "admin@fontaxi.io";
-  const password = "FonTaxi@Admin2026";
+  const password = "FonTaxi@Admin123456";
 
   // List existing auth users to find admin by email
   const { data: userList } = await adminClient.auth.admin.listUsers();
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     }, { onConflict: "email" });
 
   return new Response(
-    JSON.stringify({ success: true, message: "Admin created", uid: authData.user.id }),
+    JSON.stringify({ success: true, message: "Admin ready", uid: authUserId }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
 });
