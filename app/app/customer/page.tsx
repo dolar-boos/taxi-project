@@ -701,8 +701,8 @@ export default function CustomerApp() {
 
   const driversWithin3km = useMemo(() => {
     if (!userLocation) return [];
-    return nearbyCars.filter((c) => (c.distance ?? 0) <= SEARCH_RADIUS_KM);
-  }, [nearbyCars, userLocation]);
+    return nearbyCars.filter((c) => (c.distance ?? 0) <= (pricingSettings?.search_radius_km ?? DEFAULT_SEARCH_RADIUS_KM));
+  }, [nearbyCars, userLocation, pricingSettings]);
 
   return (
     <div className="fixed inset-0 bg-fon-black overflow-y-auto">
