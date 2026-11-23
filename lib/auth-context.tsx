@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { Driver } from '@/lib/supabase';
+import type { Profile } from '@/lib/supabase';
 
 export type AppRole = 'customer' | 'driver' | 'admin';
 
@@ -10,12 +10,13 @@ export interface AuthSession {
   role: AppRole;
   phone: string;
   driverId?: string;
+  profileId?: string;
 }
 
 interface AuthContextValue {
   session: AuthSession | null;
   loading: boolean;
-  signIn: (role: AppRole, phone: string, driverId?: string) => Promise<void>;
+  signIn: (role: AppRole, phone: string, driverId?: string, profileId?: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -33,24 +34,15 @@ export function useAuth() {
 const SESSION_KEY = 'fon_auth_session';
 const FON_USER_KEY = 'fon_user';
 
-function phoneToEmail(phone: string): string {
-  return `${phone.replace(/[^0-9]/g, '')}@fon-taxi.app`;
-}
-
-function phoneToPassword(phone: string): string {
-  return `Fon_${phone.replace(/[^0-9]/g, '')}_2026`;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Restore session on mount — check both localStorage and Supabase
   useEffect(() => {
     let mounted = true;
 
     const restore = async () => {
-      // 1. Check localStorage for our app session (fon_auth_session or fon_user)
+      // 1. Check localStorage for our app session
       const saved = localStorage.getItem(SESSION_KEY) || localStorage.getItem(FON_USER_KEY);
       if (saved) {
         try {
@@ -59,63 +51,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(parsed);
             setLoading(false);
           }
-          // Keep both keys in sync
           localStorage.setItem(SESSION_KEY, JSON.stringify(parsed));
           localStorage.setItem(FON_USER_KEY, JSON.stringify(parsed));
-
-          // 2. Try to restore Supabase session too (refresh token)
-          const { data: { session: supaSession } } = await supabase.auth.getSession();
-          if (!supaSession && mounted) {
-            // No active Supabase session — try to sign in silently with stored phone
-            // This re-establishes the session if the refresh token expired
-            if (parsed.phone) {
-              await supabase.auth.signInWithPassword({
-                email: phoneToEmail(parsed.phone),
-                password: phoneToPassword(parsed.phone),
-              }).catch(() => {});
-            }
-          }
           return;
         } catch {
           // Fall through
         }
       }
 
-      // 3. Check if Supabase has a session even without localStorage
+      // 2. Check if Supabase has an admin session
       const { data: { session: supaSession } } = await supabase.auth.getSession();
       if (supaSession && mounted) {
-        const phone = supaSession.user?.email?.replace('@fon-taxi.app', '') ?? '';
-        const role = (supaSession.user?.user_metadata?.['role'] as AppRole) ?? 'customer';
-        const driverId = supaSession.user?.user_metadata?.['driver_id'] as string | undefined;
-        const restored: AuthSession = { role, phone, driverId };
-        localStorage.setItem(SESSION_KEY, JSON.stringify(restored));
-        setSession(restored);
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, phone, role')
+          .eq('user_id', supaSession.user.id)
+          .maybeSingle();
+        if (prof && prof.role === 'admin') {
+          const restored: AuthSession = {
+            role: 'admin',
+            phone: prof.phone,
+            profileId: prof.id,
+          };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(restored));
+          setSession(restored);
+        }
       }
       if (mounted) setLoading(false);
     };
 
     restore();
 
-    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supaSession) => {
       (async () => {
         if (!supaSession) {
-          // Session was revoked or signed out
-          // Only clear if we didn't just sign in (avoid race)
           const stillSaved = localStorage.getItem(SESSION_KEY) || localStorage.getItem(FON_USER_KEY);
           if (!stillSaved && mounted) {
             setSession(null);
           }
           return;
         }
-        // Session exists — make sure our app state reflects it
-        const phone = supaSession.user?.email?.replace('@fon-taxi.app', '') ?? '';
-        const role = (supaSession.user?.user_metadata?.['role'] as AppRole) ?? 'customer';
-        const driverId = supaSession.user?.user_metadata?.['driver_id'] as string | undefined;
-        const newSession: AuthSession = { role, phone, driverId };
-        localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
-        localStorage.setItem(FON_USER_KEY, JSON.stringify(newSession));
-        if (mounted) setSession(newSession);
+        // For admin sessions, check profile
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, phone, role')
+          .eq('user_id', supaSession.user.id)
+          .maybeSingle();
+        if (prof && prof.role === 'admin') {
+          const newSession: AuthSession = {
+            role: 'admin',
+            phone: prof.phone,
+            profileId: prof.id,
+          };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
+          localStorage.setItem(FON_USER_KEY, JSON.stringify(newSession));
+          if (mounted) setSession(newSession);
+        }
       })();
     });
 
@@ -125,38 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signIn = useCallback(async (role: AppRole, phone: string, driverId?: string) => {
-    const email = phoneToEmail(phone);
-    const password = phoneToPassword(phone);
-
-    // Try to sign in first (returning user)
-    const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
-
-    let user = signInData.user;
-
-    // If user doesn't exist, sign up
-    if (error && (error.message.includes('Invalid login') || error.message.includes('not confirmed'))) {
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { role, phone, driver_id: driverId },
-        },
-      });
-      if (signUpError) throw signUpError;
-      user = signUpData.user;
-    } else if (error) {
-      throw error;
-    }
-
-    // If we have a session but need to update metadata (e.g., driver_id changed)
-    if (user && driverId) {
-      await supabase.auth.updateUser({
-        data: { role, phone, driver_id: driverId },
-      });
-    }
-
-    const newSession: AuthSession = { role, phone, driverId };
+  const signIn = useCallback(async (role: AppRole, phone: string, driverId?: string, profileId?: string) => {
+    const newSession: AuthSession = { role, phone, driverId, profileId };
     localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
     localStorage.setItem(FON_USER_KEY, JSON.stringify(newSession));
     setSession(newSession);
@@ -177,4 +138,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
+}
+
+export async function getOrCreateProfile(phone: string, role: AppRole): Promise<Profile | null> {
+  const { data: existing } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('phone', phone)
+    .maybeSingle();
+
+  if (existing) {
+    // Update role if needed
+    if (existing.role !== role) {
+      await supabase
+        .from('profiles')
+        .update({ role, updated_at: new Date().toISOString() })
+        .eq('id', existing.id);
+    }
+    return existing as Profile;
+  }
+
+  const { data: created, error } = await supabase
+    .from('profiles')
+    .insert({
+      phone,
+      role,
+      rating: 5.0,
+      total_rides: 0,
+    })
+    .select()
+    .maybeSingle();
+
+  if (error || !created) return null;
+  return created as Profile;
 }

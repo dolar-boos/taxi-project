@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { User, Phone, Loader2, ArrowLeft } from 'lucide-react';
+import { User, Phone, Loader2 } from 'lucide-react';
+import { useAuth, getOrCreateProfile } from '@/lib/auth-context';
+import { sendOtp, verifyOtp, OTP_LENGTH, OTP_DEMO_MODE } from '@/lib/otp';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/lib/auth-context';
 
 export default function CustomerAuthPage() {
   const router = useRouter();
@@ -14,37 +15,33 @@ export default function CustomerAuthPage() {
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
 
-  // If already logged in as customer, go to map
   useEffect(() => {
     if (!authLoading && session?.role === 'customer') {
       router.push('/app/customer');
     }
   }, [authLoading, session, router]);
 
-  const sendOTP = async () => {
+  const handleSendOtp = async () => {
     if (phone.length < 8) {
       toast.error('اكتب رقم موبايل صحيح');
       return;
     }
     setLoading(true);
+    setDemoCode(null);
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ phone }),
-      });
-      if (!response.ok) throw new Error('Failed');
-      const result = await response.json();
+      const result = await sendOtp(phone);
+      if (!result.success) {
+        toast.error(result.error || 'ما زبط إرسال الرمز');
+        return;
+      }
       setSent(true);
-      if (result.smsSent) {
-        toast.success('بعتنا لك رمز التحقق على رقمك');
+      if (result.demoMode && result.code) {
+        setDemoCode(result.code);
+        toast.success('تم إنشاء رمز التحقق التجريبي');
       } else {
-        toast.success(`رمز التحقق: ${result.code}`);
+        toast.success('بعتنا لك رمز التحقق على رقمك');
       }
     } catch {
       toast.error('ما زبط إرسال الرمز - جرب مرة تانية');
@@ -53,45 +50,27 @@ export default function CustomerAuthPage() {
     }
   };
 
-  const verifyOTP = async () => {
-    if (code.length < 4) {
-      toast.error('اكتب رمز التحقق');
+  const handleVerify = async () => {
+    if (code.length !== OTP_LENGTH) {
+      toast.error(`اكتب ${OTP_LENGTH} أرقام`);
       return;
     }
     setLoading(true);
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ phone, verify: true, code }),
-      });
-      const result = await response.json();
-      if (!response.ok || !result.verified) {
+      const result = await verifyOtp(phone, code);
+      if (!result.verified) {
         toast.error(result.error || 'رمز غلط');
-        setLoading(false);
         return;
       }
 
-      // Create or update profile
-      await supabase.from('profiles').upsert({
-        phone,
-        role: 'customer',
-        rating: 5.0,
-        total_rides: 0,
-      }, { onConflict: 'phone' });
+      const profile = await getOrCreateProfile(phone, 'customer');
 
-      // Ensure wallet exists
       await supabase.from('wallets').upsert({
         phone,
         balance: 0,
       }, { onConflict: 'phone' });
 
-      // Sign in with Supabase auth (creates persistent session)
-      await signIn('customer', phone);
+      await signIn('customer', phone, undefined, profile?.id);
       toast.success('تم تسجيل الدخول');
       router.push('/app/customer');
     } catch {
@@ -128,11 +107,11 @@ export default function CustomerAuthPage() {
                     placeholder="7XXXXXXXX"
                     className="fon-input flex-1 px-4 py-3 text-sm"
                     dir="ltr"
-                    onKeyDown={(e) => e.key === 'Enter' && sendOTP()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendOtp()}
                   />
                 </div>
               </div>
-              <button onClick={sendOTP} disabled={loading} className="fon-btn-gold w-full py-3.5 flex items-center justify-center gap-2">
+              <button onClick={handleSendOtp} disabled={loading} className="fon-btn-gold w-full py-3.5 flex items-center justify-center gap-2">
                 {loading && <Loader2 className="w-5 h-5 animate-spin" />}
                 إرسال رمز التحقق
               </button>
@@ -143,25 +122,34 @@ export default function CustomerAuthPage() {
                 <p className="text-sm text-fon-gold-dark mb-1">أرسلنا رمز التحقق إلى</p>
                 <p className="text-sm text-fon-gold-light font-semibold" dir="ltr">+962{phone}</p>
               </div>
+
+              {OTP_DEMO_MODE && demoCode && (
+                <div className="rounded-xl border-2 border-dashed border-fon-gold/40 bg-fon-gold/10 p-4 text-center">
+                  <p className="text-xs text-fon-gold-dark mb-1">الكود التجريبي - للتجربة فقط</p>
+                  <p className="text-3xl font-black tracking-[0.3em] fon-text-gradient-gold" dir="ltr">{demoCode}</p>
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-semibold text-fon-gold-light mb-2 block">رمز التحقق</label>
                 <input
                   type="text"
                   inputMode="numeric"
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="••••"
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, OTP_LENGTH))}
+                  placeholder={'•'.repeat(OTP_LENGTH)}
                   className="fon-input w-full px-4 py-3 text-center text-2xl tracking-widest"
                   dir="ltr"
-                  maxLength={4}
-                  onKeyDown={(e) => e.key === 'Enter' && verifyOTP()}
+                  maxLength={OTP_LENGTH}
+                  onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+                  autoFocus
                 />
               </div>
-              <button onClick={verifyOTP} disabled={loading} className="fon-btn-gold w-full py-3.5 flex items-center justify-center gap-2">
+              <button onClick={handleVerify} disabled={loading} className="fon-btn-gold w-full py-3.5 flex items-center justify-center gap-2">
                 {loading && <Loader2 className="w-5 h-5 animate-spin" />}
                 تحقق ودخول
               </button>
-              <button onClick={() => { setSent(false); setCode(''); }} className="w-full text-xs text-fon-gold-dark hover:text-fon-gold transition">
+              <button onClick={() => { setSent(false); setCode(''); setDemoCode(null); }} className="w-full text-xs text-fon-gold-dark hover:text-fon-gold transition">
                 تغيير الرقم
               </button>
             </>

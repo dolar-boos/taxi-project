@@ -11,6 +11,7 @@ import {
 import { supabase, type Driver, type CarType } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { captureAndUpload } from '@/lib/camera';
+import { sendOtp, verifyOtp, OTP_LENGTH, OTP_DEMO_MODE } from '@/lib/otp';
 
 const VEHICLE_TYPES: { id: CarType; label: string; icon: typeof Car }[] = [
   { id: 'electric', label: 'كهربائية', icon: Zap },
@@ -41,6 +42,7 @@ export default function DriverAuthPage() {
   const [driverWithCar, setDriverWithCar] = useState<UploadState>({ url: null, preview: null });
   const [selfie, setSelfie] = useState<UploadState>({ url: null, preview: null });
   const [savedDriver, setSavedDriver] = useState<Driver | null>(null);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -95,18 +97,16 @@ export default function DriverAuthPage() {
   };
 
   const sendOTPForPhone = async (p: string) => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const response = await fetch(`${supabaseUrl}/functions/v1/send-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}` },
-      body: JSON.stringify({ phone: p }),
-    });
-    if (!response.ok) throw new Error('OTP send failed');
-    const result = await response.json();
-    if (result.smsSent) {
-      toast.success('بعتنا لك رمز التحقق على رقمك');
+    const result = await sendOtp(p);
+    if (!result.success) {
+      toast.error(result.error || 'ما زبط إرسال الرمز');
+      return;
+    }
+    if (result.demoMode && result.code) {
+      setDemoCode(result.code);
+      toast.success('تم إنشاء رمز التحقق التجريبي');
     } else {
-      toast.success(`رمز التحقق: ${result.code}`);
+      toast.success('بعتنا لك رمز التحقق على رقمك');
     }
   };
 
@@ -187,17 +187,11 @@ export default function DriverAuthPage() {
   };
 
   const verifyOTP = async () => {
-    if (code.length < 4) { toast.error('اكتب رمز التحقق'); return; }
+    if (code.length !== OTP_LENGTH) { toast.error(`اكتب ${OTP_LENGTH} أرقام`); return; }
     setLoading(true);
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ phone, verify: true, code }),
-      });
-      const result = await response.json();
-      if (!response.ok || !result.verified) {
+      const result = await verifyOtp(phone, code);
+      if (!result.verified) {
         toast.error(result.error || 'رمز غلط'); setLoading(false); return;
       }
       const driverId = savedDriver?.id || existingDriver?.id;
@@ -397,11 +391,17 @@ export default function DriverAuthPage() {
               <p className="text-sm text-fon-gold-dark mb-1">أرسلنا رمز التحقق إلى</p>
               <p className="text-sm text-fon-gold-light font-semibold" dir="ltr">+962{phone}</p>
             </div>
+            {OTP_DEMO_MODE && demoCode && (
+              <div className="rounded-xl border-2 border-dashed border-fon-gold/40 bg-fon-gold/10 p-4 text-center">
+                <p className="text-xs text-fon-gold-dark mb-1">الكود التجريبي - للتجربة فقط</p>
+                <p className="text-3xl font-black tracking-[0.3em] fon-text-gradient-gold" dir="ltr">{demoCode}</p>
+              </div>
+            )}
             <div>
               <label className="text-sm font-semibold text-fon-gold-light mb-2 block">رمز التحقق</label>
-              <input type="text" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)}
-                placeholder="••••" className="fon-input w-full px-4 py-3 text-center text-2xl tracking-widest"
-                dir="ltr" maxLength={4} onKeyDown={(e) => e.key === 'Enter' && verifyOTP()} autoFocus />
+              <input type="text" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, OTP_LENGTH))}
+                placeholder={'•'.repeat(OTP_LENGTH)} className="fon-input w-full px-4 py-3 text-center text-2xl tracking-widest"
+                dir="ltr" maxLength={OTP_LENGTH} onKeyDown={(e) => e.key === 'Enter' && verifyOTP()} autoFocus />
             </div>
             <button onClick={verifyOTP} disabled={loading} className="fon-btn-gold w-full py-3.5 flex items-center justify-center gap-2">
               {loading && <Loader2 className="w-5 h-5 animate-spin" />}

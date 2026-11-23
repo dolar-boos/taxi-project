@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Lock, Mail, Loader2, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { Lock, Mail, Loader2, Settings as SettingsIcon, LogOut, KeyRound } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 export default function AdminAuthPage() {
@@ -12,6 +12,8 @@ export default function AdminAuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [showReset, setShowReset] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -19,7 +21,7 @@ export default function AdminAuthPage() {
         supabase
           .from('profiles')
           .select('role')
-          .eq('id', session.user.id)
+          .eq('user_id', session.user.id)
           .maybeSingle()
           .then(({ data }) => {
             if (data?.role === 'admin') router.push('/admin');
@@ -42,11 +44,14 @@ export default function AdminAuthPage() {
       if (data.user) {
         const { data: prof } = await supabase
           .from('profiles')
-          .select('role')
+          .select('id, role, phone')
           .eq('user_id', data.user.id)
           .maybeSingle();
 
         if (prof?.role === 'admin') {
+          const session = { role: 'admin' as const, phone: prof.phone || email, profileId: prof.id };
+          localStorage.setItem('fon_auth_session', JSON.stringify(session));
+          localStorage.setItem('fon_user', JSON.stringify(session));
           toast.success('أهلاً بك في لوحة التحكم');
           router.push('/admin');
         } else {
@@ -61,16 +66,35 @@ export default function AdminAuthPage() {
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!email) {
+      toast.error('اكتب الايميل أولاً');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/admin`,
+      });
+      if (error) throw error;
+      toast.success('بعتنا لك رابط استعادة كلمة السر على ايميلك');
+      setShowReset(false);
+    } catch {
+      toast.error('ما زبط إرسال رابط الاستعادة - تأكد من الايميل');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    localStorage.clear();
-    sessionStorage.clear();
+    localStorage.removeItem('fon_auth_session');
+    localStorage.removeItem('fon_user');
     router.push('/auth/admin');
   };
 
   return (
     <div className="min-h-screen fon-gradient-dark px-4 py-0">
-      {/* Top bar — logout button left, settings icon right */}
       <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between p-3 backdrop-blur-md border-b border-fon-gold/20" style={{ background: 'rgba(10,25,49,0.92)' }}>
         <button
           onClick={handleLogout}
@@ -101,7 +125,7 @@ export default function AdminAuthPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@fontaxi.jo"
+              placeholder="admin@fontaxi.io"
               className="fon-input w-full px-4 py-3 text-sm"
               dir="ltr"
             />
@@ -130,6 +154,34 @@ export default function AdminAuthPage() {
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
             دخول
           </button>
+
+          {showReset ? (
+            <div className="space-y-3 animate-fade-in">
+              <p className="text-xs text-fon-gold-dark text-center">راح نبعت رابط استعادة كلمة السر على ايميلك</p>
+              <button
+                onClick={handleResetPassword}
+                disabled={resetLoading}
+                className="w-full py-3 text-sm font-semibold rounded-xl border border-fon-gold/30 text-fon-gold hover:bg-fon-gold/10 transition flex items-center justify-center gap-2"
+              >
+                {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                إرسال رابط الاستعادة
+              </button>
+              <button
+                onClick={() => setShowReset(false)}
+                className="w-full text-xs text-fon-gold-dark hover:text-fon-gold transition"
+              >
+                إلغاء
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowReset(true)}
+              className="w-full text-xs text-fon-gold-dark hover:text-fon-gold transition flex items-center justify-center gap-1.5"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              نسيت كلمة السر؟
+            </button>
+          )}
         </div>
 
         <div className="text-center mt-4 space-y-2">
