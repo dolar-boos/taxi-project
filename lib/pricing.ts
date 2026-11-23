@@ -34,6 +34,7 @@ export interface DBPricingSettings {
   night_end_hour: number;
   wait_price_per_min: number;
   included_km?: number;
+  search_radius_km?: number;
   car_pricing: Record<string, CarTypePricing>;
 }
 
@@ -55,7 +56,7 @@ export async function loadPricingSettings(): Promise<DBPricingSettings | null> {
     const { supabase } = await import('./supabase');
     const { data } = await supabase
       .from('pricing_settings')
-      .select('night_start_hour, night_end_hour, wait_price_per_min, included_km, car_pricing')
+      .select('night_start_hour, night_end_hour, wait_price_per_min, included_km, search_radius_km, car_pricing')
       .eq('id', 1)
       .maybeSingle();
     if (data) {

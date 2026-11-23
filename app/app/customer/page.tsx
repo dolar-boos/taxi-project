@@ -41,7 +41,7 @@ type Phase = 'idle' | 'requesting' | 'searching' | 'assigned' | 'in_progress' | 
 type PayMethod = 'wallet' | 'cash';
 
 const IRBID: { lat: number; lng: number } = { lat: 32.5568, lng: 35.8473 };
-const SEARCH_RADIUS_KM = 3;
+const DEFAULT_SEARCH_RADIUS_KM = 3;
 
 interface DriverWithDetails {
   id: string;
@@ -230,7 +230,7 @@ export default function CustomerApp() {
           const dLng = (d as Record<string, unknown>).current_lng as number | null;
           if (dLat == null || dLng == null) return false;
           const dist = haversineDistance(userLocation.lat, userLocation.lng, dLat, dLng);
-          return dist <= SEARCH_RADIUS_KM;
+          return dist <= (pricingSettings?.search_radius_km ?? DEFAULT_SEARCH_RADIUS_KM);
         })
         .map((d) => {
           const dLat = (d as Record<string, unknown>).current_lat as number;
@@ -263,7 +263,7 @@ export default function CustomerApp() {
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [userLocation]);
+  }, [userLocation, pricingSettings]);
 
   const nearbyCars: NearbyCar[] = useMemo(() => {
     if (!userLocation) return [];

@@ -40,6 +40,7 @@ interface PricingSettings {
   night_end_hour: number;
   wait_price_per_min: number;
   included_km: number;
+  search_radius_km: number;
   car_pricing: Record<string, CarPricingEntry>;
 }
 
@@ -137,6 +138,15 @@ export default function AdminSettingsPage() {
           .eq('id', 1)
           .maybeSingle();
         if (pd) setPricing(pd as PricingSettings);
+        else setPricing({
+          id: 1,
+          night_start_hour: 22,
+          night_end_hour: 6,
+          wait_price_per_min: 0.05,
+          included_km: 3,
+          search_radius_km: 3,
+          car_pricing: {},
+        });
 
         const { data: pm } = await supabase
           .from('payment_methods')
@@ -175,6 +185,7 @@ export default function AdminSettingsPage() {
           night_end_hour: pricing.night_end_hour,
           wait_price_per_min: pricing.wait_price_per_min,
           included_km: pricing.included_km,
+          search_radius_km: pricing.search_radius_km,
           car_pricing: pricing.car_pricing,
         });
       if (error) throw error;
@@ -463,6 +474,25 @@ export default function AdminSettingsPage() {
               >
                 <option value={2}>2 كم</option>
                 <option value={3}>3 كم</option>
+              </select>
+            </div>
+
+            <div className="rounded-2xl border border-[#C9A86A]/15 p-5" style={cardStyle}>
+              <label className="text-sm font-bold mb-3 block" style={{ color: goldColor }}>
+                نطاق رؤية السائقين للراكب (كم)
+              </label>
+              <p className="text-xs mb-3" style={{ color: goldDark }}>
+                يحدد المسافة التي يظهر فيها السائقون على خريطة الراكب عند فتح التطبيق
+              </p>
+              <select
+                value={pricing.search_radius_km ?? 3}
+                onChange={(e) => setPricing({ ...pricing, search_radius_km: Number(e.target.value) })}
+                className={inputClass}
+                style={{ color: lightGold }}
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((km) => (
+                  <option key={km} value={km}>{km} كم</option>
+                ))}
               </select>
             </div>
 
