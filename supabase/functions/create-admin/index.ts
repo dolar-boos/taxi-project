@@ -18,21 +18,20 @@ Deno.serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const email = "admin@fontaxi.jo";
+  const email = "admin@fontaxi.io";
   const password = "FonTaxi@Admin2026";
 
-  // Check if user already exists
-  const { data: existing } = await adminClient
-    .from("profiles")
-    .select("id, user_id")
-    .eq("email", email)
-    .maybeSingle();
+  // List existing auth users to find admin by email
+  const { data: userList } = await adminClient.auth.admin.listUsers();
+  const existingAuth = userList?.users?.find((u) => u.email === email);
 
-  if (existing?.user_id) {
-    // Update password
+  let authUserId: string;
+
+  if (existingAuth) {
+    // Update password on existing user
     const { error: updateErr } = await adminClient.auth.admin.updateUserById(
-      existing.user_id,
-      { password }
+      existingAuth.id,
+      { password, email_confirm: true }
     );
     if (updateErr) {
       return new Response(
@@ -40,27 +39,25 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    return new Response(
-      JSON.stringify({ success: true, message: "Password updated" }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    authUserId = existingAuth.id;
+  } else {
+    // Create new admin auth user
+    const { data: authData, error: authErr } = await adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+
+    if (authErr) {
+      return new Response(
+        JSON.stringify({ error: authErr.message }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    authUserId = authData.user.id;
   }
 
-  // Create new admin user
-  const { data: authData, error: authErr } = await adminClient.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
-
-  if (authErr) {
-    return new Response(
-      JSON.stringify({ error: authErr.message }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-  // Upsert profile
+  // Upsert profile with user_id linked to auth user
   await adminClient
     .from("profiles")
     .upsert({
@@ -68,7 +65,7 @@ Deno.serve(async (req) => {
       role: "admin",
       phone: "admin",
       name: "مدير النظام",
-      user_id: authData.user.id,
+      user_id: authUserId,
     }, { onConflict: "email" });
 
   return new Response(

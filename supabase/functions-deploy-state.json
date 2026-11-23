@@ -1,0 +1,17 @@
+{
+  "projectId": "73154542",
+  "functions": {
+    "create-admin": {
+      "hasChanged": false,
+      "hash": "99053be8c13f8769908066341cf8d7ae5617099ef84b0c9a565f928628303e60"
+    },
+    "driver-arrived": {
+      "hasChanged": false,
+      "hash": "c259e9cb70b8f00e94312cf6ba7bee2ee4dc34b351e989a0863efe5a462669c2"
+    },
+    "send-otp": {
+      "hasChanged": false,
+      "hash": "4a3a6880e6641ed1cce6335059481741d9347857b791243eaf8657721fe0d224"
+    }
+  }
+}
