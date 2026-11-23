@@ -1870,9 +1870,9 @@ export default function AdminApp() {
               <span className="text-xs font-bold px-3 py-1.5 rounded-full border border-[#C9A86A]/30" style={{ color: goldColor }}>
                 سعر الكم: {kmPriceDay.toFixed(2)} د.أ
               </span>
-              {driverMapModal.lat != null && driverMapModal.lng != null ? (
+              {driverMapModal.current_lat != null && driverMapModal.current_lng != null ? (
                 <span className="text-[10px] font-mono px-2 py-1 rounded-full border border-[#C9A86A]/20" style={{ color: goldDark }} dir="ltr">
-                  {driverMapModal.lat.toFixed(4)}, {driverMapModal.lng.toFixed(4)}
+                  {driverMapModal.current_lat.toFixed(4)}, {driverMapModal.current_lng.toFixed(4)}
                 </span>
               ) : (
                 <span className="text-[10px] px-2 py-1 rounded-full border border-yellow-500/20 text-yellow-400">
@@ -1885,11 +1885,11 @@ export default function AdminApp() {
               drivers={liveMapMarkers.filter((m) => m.id === driverMapModal.id || m.is_online)}
               height={350}
               center={
-                driverMapModal.lat != null && driverMapModal.lng != null
-                  ? { lat: driverMapModal.lat, lng: driverMapModal.lng }
+                driverMapModal.current_lat != null && driverMapModal.current_lng != null
+                  ? { lat: driverMapModal.current_lat, lng: driverMapModal.current_lng }
                   : { lat: 32.5568, lng: 35.8478 }
               }
-              zoom={driverMapModal.lat != null ? 15 : 13}
+              zoom={driverMapModal.current_lat != null ? 15 : 13}
               selectedDriverId={driverMapModal.id}
               trackingDriverId={trackingDriverId}
             />
@@ -1901,7 +1901,7 @@ export default function AdminApp() {
                     setTrackingDriverId(null);
                     toast.info('تم إيقاف التتبع المباشر');
                   } else {
-                    if (driverMapModal.lat == null) {
+                    if (driverMapModal.current_lat == null) {
                       toast.error('ما في إحداثيات لهذا السائق - ما يقدر يتتبع');
                       return;
                     }
