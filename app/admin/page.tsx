@@ -113,7 +113,7 @@ interface DBPromo {
   created_at: string;
 }
 
-type Tab = 'drivers' | 'passengers' | 'trips' | 'live' | 'wallets' | 'discounts' | 'topups';
+type Tab = 'overview' | 'users' | 'drivers' | 'trips' | 'finance' | 'settings';
 
 interface TopupRequest {
   id: string;
@@ -177,7 +177,7 @@ const rideStatusMap: Record<string, TripMapData['status']> = {
 
 export default function AdminApp() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('drivers');
+  const [tab, setTab] = useState<Tab>('overview');
   const [tripsView, setTripsView] = useState<'list' | 'map'>('list');
   const [loaded, setLoaded] = useState(false);
   const [mapModalTrips, setMapModalTrips] = useState<{ title: string; trips: TripMapData[] } | null>(null);
@@ -210,6 +210,10 @@ export default function AdminApp() {
   const [dbWallets, setDbWallets] = useState<DBWallet[]>([]);
   const [dbPromoCodes, setDbPromoCodes] = useState<DBPromo[]>([]);
   const [discountLoading, setDiscountLoading] = useState(false);
+  const [dbLoading, setDbLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [dbPayments, setDbPayments] = useState<{ id: string; ride_id: string | null; phone: string; amount: number; method: string; status: string; created_at: string }[]>([]);
+  const [dbWalletTxns, setDbWalletTxns] = useState<TopupRequest[]>([]);
 
   // Live map state
   const [driverMapModal, setDriverMapModal] = useState<DBDriver | null>(null);
@@ -218,83 +222,119 @@ export default function AdminApp() {
 
   const loadDBDrivers = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('drivers')
         .select('id, name, phone, car_number, car_type, car_model, car_color, car_year, national_id, license_number, status, is_approved, is_online, is_active, rating, total_rides, vehicle_license_url, driver_with_car_url, selfie_url, created_at, lat, lng')
         .order('created_at', { ascending: false });
+      if (error) throw error;
       if (data) setDbDrivers(data as DBDriver[]);
-    } catch { /* ignore */ }
+    } catch { setDbError('فشل تحميل السائقين'); }
   }, []);
 
   const loadDBRides = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('rides')
         .select('id, customer_phone, from_address, to_address, from_lat, from_lng, to_lat, to_lng, distance_km, price, status, driver_id, created_at')
         .order('created_at', { ascending: false });
+      if (error) throw error;
       if (data) setDbRides(data as DBRide[]);
-    } catch { /* ignore */ }
+    } catch { setDbError('فشل تحميل المشاوير'); }
   }, []);
 
   const loadDBPassengers = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('id, phone, name, avatar_url, rating, total_rides, is_blocked, created_at')
         .eq('role', 'customer')
         .order('created_at', { ascending: false });
+      if (error) throw error;
       if (data) setDbPassengers(data as DBPassenger[]);
-    } catch { /* ignore */ }
+    } catch { setDbError('فشل تحميل الركاب'); }
   }, []);
 
   const loadDBWallets = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('wallets')
         .select('id, phone, balance, created_at, updated_at')
         .order('created_at', { ascending: false });
+      if (error) throw error;
       if (data) setDbWallets(data as DBWallet[]);
-    } catch { /* ignore */ }
+    } catch { setDbError('فشل تحميل المحافظ'); }
+  }, []);
+
+  const loadDBPayments = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select('id, ride_id, phone, amount, method, status, created_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      if (data) setDbPayments(data as typeof dbPayments);
+    } catch { setDbError('فشل تحميل المدفوعات'); }
+  }, []);
+
+  const loadDBWalletTxns = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('wallet_transactions')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      if (data) setDbWalletTxns(data as TopupRequest[]);
+    } catch { setDbError('فشل تحميل معاملات المحفظة'); }
   }, []);
 
   const loadDBPromos = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('promo_codes')
         .select('*')
         .order('created_at', { ascending: false });
+      if (error) throw error;
       if (data) setDbPromoCodes(data as DBPromo[]);
-    } catch { /* ignore */ }
+    } catch { setDbError('فشل تحميل أكواد الخصم'); }
   }, []);
 
   const loadTopupRequests = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('wallet_transactions')
         .select('*')
         .eq('type', 'topup')
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
+      if (error) throw error;
       if (data) setTopupRequests(data as TopupRequest[]);
-    } catch { /* ignore */ }
+    } catch { setDbError('فشل تحميل طلبات الشحن'); }
   }, []);
 
   useEffect(() => {
-    setLoaded(true);
-    loadTopupRequests();
-    loadDBDrivers();
-    loadDBRides();
-    loadDBPassengers();
-    loadDBWallets();
-    loadDBPromos();
-    supabase
-      .from('settings')
-      .select('km_price_day')
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data?.km_price_day) setKmPriceDay(data.km_price_day);
-      });
-  }, [loadTopupRequests, loadDBDrivers, loadDBRides, loadDBPassengers, loadDBWallets, loadDBPromos]);
+    (async () => {
+      setDbLoading(true);
+      setDbError(null);
+      await Promise.all([
+        loadTopupRequests(),
+        loadDBDrivers(),
+        loadDBRides(),
+        loadDBPassengers(),
+        loadDBWallets(),
+        loadDBPromos(),
+        loadDBPayments(),
+        loadDBWalletTxns(),
+      ]);
+      setDbLoading(false);
+      supabase
+        .from('settings')
+        .select('km_price_day')
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.km_price_day) setKmPriceDay(data.km_price_day);
+        });
+    })();
+  }, [loadTopupRequests, loadDBDrivers, loadDBRides, loadDBPassengers, loadDBWallets, loadDBPromos, loadDBPayments, loadDBWalletTxns]);
 
   const pendingDrivers = useMemo(() => dbDrivers.filter((d) => d.status === 'pending_approval'), [dbDrivers]);
   const availableDrivers = useMemo(() => dbDrivers.filter((d) => d.status !== 'pending_approval'), [dbDrivers]);
@@ -594,13 +634,12 @@ export default function AdminApp() {
   // --- Render ---
 
   const tabs: { id: Tab; label: string; icon: typeof Activity }[] = [
-    { id: 'drivers', label: 'السواق', icon: Users },
-    { id: 'passengers', label: 'الركاب', icon: User },
-    { id: 'trips', label: 'المشاوير', icon: RouteIcon },
-    { id: 'live', label: 'التحكم المباشر', icon: Activity },
-    { id: 'wallets', label: 'المحفظة', icon: WalletIcon },
-    { id: 'topups', label: 'طلبات الشحن', icon: ArrowDownCircle },
-    { id: 'discounts', label: 'أكواد الخصم', icon: Tag },
+    { id: 'overview', label: 'نظرة عامة', icon: Activity },
+    { id: 'users', label: 'المستخدمين', icon: User },
+    { id: 'drivers', label: 'السائقين', icon: Users },
+    { id: 'trips', label: 'الرحلات', icon: RouteIcon },
+    { id: 'finance', label: 'المالية', icon: WalletIcon },
+    { id: 'settings', label: 'الإعدادات', icon: SettingsIcon },
   ];
 
   if (!loaded) {
@@ -707,6 +746,243 @@ export default function AdminApp() {
       </div>
 
       <main className="max-w-6xl mx-auto px-4 py-4">
+        {/* Loading state */}
+        {dbLoading && (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-[#C9A86A] border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+
+        {/* Error state */}
+        {dbError && !dbLoading && (
+          <div className="rounded-2xl border border-red-500/30 p-6 text-center" style={{ background: 'rgba(239,68,68,0.1)' }}>
+            <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+            <p className="text-sm text-red-300">{dbError}</p>
+            <button onClick={() => { setDbError(null); setTab('overview'); window.location.reload(); }} className="mt-3 px-4 py-2 text-xs font-bold rounded-lg border border-red-400/30 text-red-400 hover:bg-red-400/10 transition">
+              إعادة المحاولة
+            </button>
+          </div>
+        )}
+
+        {/* Overview Tab */}
+        {tab === 'overview' && !dbLoading && (
+          <div className="animate-fade-in space-y-4">
+            <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
+              <Activity className="w-5 h-5" /> نظرة عامة
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                <div className="flex items-center gap-2 text-xs mb-2" style={{ color: goldDark }}>
+                  <User className="w-3.5 h-3.5" /> المستخدمين
+                </div>
+                <div className="text-2xl font-bold" style={{ color: goldColor }}>{dbPassengers.length}</div>
+              </div>
+              <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                <div className="flex items-center gap-2 text-xs mb-2" style={{ color: goldDark }}>
+                  <Users className="w-3.5 h-3.5" /> السائقين
+                </div>
+                <div className="text-2xl font-bold" style={{ color: goldColor }}>{dbDrivers.length}</div>
+              </div>
+              <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                <div className="flex items-center gap-2 text-xs mb-2" style={{ color: goldDark }}>
+                  <RouteIcon className="w-3.5 h-3.5" /> الرحلات
+                </div>
+                <div className="text-2xl font-bold" style={{ color: goldColor }}>{dbRides.length}</div>
+              </div>
+              <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                <div className="flex items-center gap-2 text-xs mb-2" style={{ color: goldDark }}>
+                  <WalletIcon className="w-3.5 h-3.5" /> المدفوعات
+                </div>
+                <div className="text-2xl font-bold" style={{ color: goldColor }}>{dbPayments.length}</div>
+              </div>
+            </div>
+            {dbDrivers.length === 0 && dbPassengers.length === 0 && dbRides.length === 0 && (
+              <div className="rounded-2xl border border-[#C9A86A]/15 p-8 text-center" style={cardStyle}>
+                <p className="text-sm" style={{ color: goldDark }}>ما في بيانات بعد - الأرقام بتظهر لما يصير فيه نشاط</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Settings Tab */}
+        {tab === 'settings' && !dbLoading && (
+          <div className="animate-fade-in space-y-4">
+            <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
+              <SettingsIcon className="w-5 h-5" /> الإعدادات
+            </h2>
+            <div className="rounded-2xl border border-[#C9A86A]/15 p-6 text-center" style={cardStyle}>
+              <p className="text-sm mb-4" style={{ color: goldDark }}>إدارة الأسعار وطرق الدفع وأكواد الخصم</p>
+              <button
+                onClick={() => router.push('/admin/settings')}
+                className="px-6 py-3 text-sm font-bold rounded-xl transition hover:scale-[1.02]"
+                style={{ background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)', color: '#0A1931' }}
+              >
+                الذهاب لصفحة الإعدادات
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Finance Tab */}
+        {tab === 'finance' && !dbLoading && (
+          <div className="animate-fade-in space-y-4">
+            <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
+              <WalletIcon className="w-5 h-5" /> المالية
+            </h2>
+
+            {/* Topup requests */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <ArrowDownCircle className="w-4 h-4" /> طلبات الشحن ({topupRequests.length})
+              </h3>
+              {topupRequests.length === 0 ? (
+                <div className="rounded-2xl border border-[#C9A86A]/15 p-6 text-center" style={cardStyle}>
+                  <p className="text-sm" style={{ color: goldDark }}>ما في طلبات شحن بانتظار</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {topupRequests.map((t) => (
+                    <div key={t.id} className="rounded-2xl border border-[#C9A86A]/15 p-4 flex items-center justify-between" style={cardStyle}>
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: lightGold }} dir="ltr">{t.phone}</div>
+                        <div className="text-xs mt-1" style={{ color: goldDark }}>{formatDate(t.created_at)} {formatTime(t.created_at)}</div>
+                      </div>
+                      <div className="text-lg font-bold text-green-400">{t.amount.toFixed(2)} د.أ</div>
+                      <div className="flex gap-2">
+                        <button onClick={() => approveTopup(t.id, t.phone, t.amount)} disabled={topupProcessing === t.id} className="px-3 py-2 text-xs font-bold rounded-lg text-green-400 border border-green-400/30 hover:bg-green-400/10 transition disabled:opacity-40 flex items-center gap-1.5">
+                          {topupProcessing === t.id ? <span className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                          موافقة
+                        </button>
+                        <button onClick={() => rejectTopup(t.id)} disabled={topupProcessing === t.id} className="px-3 py-2 text-xs font-bold rounded-lg text-red-400 border border-red-400/30 hover:bg-red-400/10 transition disabled:opacity-40 flex items-center gap-1.5">
+                          <XCircle className="w-3.5 h-3.5" /> رفض
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Payments table */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <WalletIcon className="w-4 h-4" /> المدفوعات ({dbPayments.length})
+              </h3>
+              {dbPayments.length === 0 ? (
+                <div className="rounded-2xl border border-[#C9A86A]/15 p-6 text-center" style={cardStyle}>
+                  <p className="text-sm" style={{ color: goldDark }}>ما في مدفوعات</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-[#C9A86A]/15" style={cardStyle}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#C9A86A]/15" style={{ color: goldDark }}>
+                        <th className="text-right p-3 font-semibold">الرقم</th>
+                        <th className="text-center p-3 font-semibold">المبلغ</th>
+                        <th className="text-center p-3 font-semibold">الطريقة</th>
+                        <th className="text-center p-3 font-semibold">الحالة</th>
+                        <th className="text-center p-3 font-semibold">التاريخ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dbPayments.map((p) => (
+                        <tr key={p.id} className="border-b border-[#C9A86A]/10" style={{ color: lightGold }}>
+                          <td className="p-3 text-xs" dir="ltr">{p.phone}</td>
+                          <td className="p-3 text-center font-bold text-green-400">{p.amount.toFixed(2)} د.أ</td>
+                          <td className="p-3 text-center text-xs">{p.method}</td>
+                          <td className="p-3 text-center">{statusBadge(p.status)}</td>
+                          <td className="p-3 text-center text-xs" style={{ color: goldDark }}>{formatDate(p.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Wallet transactions */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <WalletIcon className="w-4 h-4" /> معاملات المحفظة ({dbWalletTxns.length})
+              </h3>
+              {dbWalletTxns.length === 0 ? (
+                <div className="rounded-2xl border border-[#C9A86A]/15 p-6 text-center" style={cardStyle}>
+                  <p className="text-sm" style={{ color: goldDark }}>ما في معاملات</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-[#C9A86A]/15" style={cardStyle}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#C9A86A]/15" style={{ color: goldDark }}>
+                        <th className="text-right p-3 font-semibold">الرقم</th>
+                        <th className="text-center p-3 font-semibold">المبلغ</th>
+                        <th className="text-center p-3 font-semibold">النوع</th>
+                        <th className="text-center p-3 font-semibold">الحالة</th>
+                        <th className="text-center p-3 font-semibold">التاريخ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dbWalletTxns.map((t) => (
+                        <tr key={t.id} className="border-b border-[#C9A86A]/10" style={{ color: lightGold }}>
+                          <td className="p-3 text-xs" dir="ltr">{t.phone}</td>
+                          <td className="p-3 text-center font-bold">{t.amount.toFixed(2)} د.أ</td>
+                          <td className="p-3 text-center text-xs">{t.type}</td>
+                          <td className="p-3 text-center text-xs">{t.status || '-'}</td>
+                          <td className="p-3 text-center text-xs" style={{ color: goldDark }}>{formatDate(t.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Wallets */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <WalletIcon className="w-4 h-4" /> المحافظ ({dbWallets.length})
+              </h3>
+              {dbWallets.length === 0 ? (
+                <div className="rounded-2xl border border-[#C9A86A]/15 p-6 text-center" style={cardStyle}>
+                  <p className="text-sm" style={{ color: goldDark }}>ما في محافظ</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-[#C9A86A]/15" style={cardStyle}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#C9A86A]/15" style={{ color: goldDark }}>
+                        <th className="text-right p-3 font-semibold">الرقم</th>
+                        <th className="text-center p-3 font-semibold">الرصيد</th>
+                        <th className="text-center p-3 font-semibold">إجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dbWallets.map((w) => (
+                        <tr key={w.id} className="border-b border-[#C9A86A]/10" style={{ color: lightGold }}>
+                          <td className="p-3 text-xs font-semibold" dir="ltr">{w.phone}</td>
+                          <td className="p-3 text-center">
+                            <span className={`font-bold ${w.balance > 0 ? 'text-green-400' : 'text-gray-400'}`}>{w.balance.toFixed(2)} د.أ</span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <button onClick={() => { setWalletAction({ entry: w, type: 'charge' }); setAmountInput(''); }} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg text-green-400 border border-green-400/30 hover:bg-green-400/10 transition">
+                                <ArrowDownCircle className="w-3.5 h-3.5" /> شحن
+                              </button>
+                              <button onClick={() => { setWalletAction({ entry: w, type: 'deduct' }); setAmountInput(''); }} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg text-red-400 border border-red-400/30 hover:bg-red-400/10 transition">
+                                <MinusCircle className="w-3.5 h-3.5" /> خصم
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Drivers Tab */}
         {tab === 'drivers' && (
           <div className="animate-fade-in space-y-4">
@@ -852,8 +1128,8 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* Passengers Tab */}
-        {tab === 'passengers' && (
+        {/* Users Tab */}
+        {tab === 'users' && (
           <div className="animate-fade-in space-y-4">
             <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
               <User className="w-5 h-5" /> الركاب ({dbPassengers.length})
@@ -1042,8 +1318,8 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* Live Control Tab */}
-        {tab === 'live' && (
+        {/* REMOVED OLD TABS START */}
+        {false && tab === 'live' && (
           <div className="animate-fade-in space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
