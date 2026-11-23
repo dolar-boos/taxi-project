@@ -219,22 +219,22 @@ export default function CustomerApp() {
       const { data } = await supabase
         .from('drivers')
         .select('*')
-        .not('lat', 'is', null)
-        .not('lng', 'is', null);
+        .not('current_lat', 'is', null)
+        .not('current_lng', 'is', null);
 
       if (!data) return;
 
       const drivers: DriverWithDetails[] = data
         .filter((d) => {
-          const dLat = (d as Record<string, unknown>).lat as number | null;
-          const dLng = (d as Record<string, unknown>).lng as number | null;
+          const dLat = (d as Record<string, unknown>).current_lat as number | null;
+          const dLng = (d as Record<string, unknown>).current_lng as number | null;
           if (dLat == null || dLng == null) return false;
           const dist = haversineDistance(userLocation.lat, userLocation.lng, dLat, dLng);
           return dist <= SEARCH_RADIUS_KM;
         })
         .map((d) => {
-          const dLat = (d as Record<string, unknown>).lat as number;
-          const dLng = (d as Record<string, unknown>).lng as number;
+          const dLat = (d as Record<string, unknown>).current_lat as number;
+          const dLng = (d as Record<string, unknown>).current_lng as number;
           return {
             id: d.id,
             name: d.name || 'كابتن',

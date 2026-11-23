@@ -223,7 +223,7 @@ export default function DriverApp() {
   useEffect(() => {
     if (!driver || !driver.is_approved) return;
     const goOffline = () => {
-      const data = JSON.stringify({ is_online: false, lat: null, lng: null, current_lat: null, current_lng: null });
+      const data = JSON.stringify({ is_online: false, current_lat: null, current_lng: null });
       if (driver.id) {
         try {
           navigator.sendBeacon(
@@ -488,7 +488,7 @@ export default function DriverApp() {
       }
       await supabase
         .from('drivers')
-        .update({ is_online: false, lat: null, lng: null, current_lat: null, current_lng: null })
+        .update({ is_online: false, current_lat: null, current_lng: null })
         .eq('id', driver.id);
     }
   };
@@ -693,7 +693,7 @@ export default function DriverApp() {
     if (driver) {
       await supabase
         .from('drivers')
-        .update({ is_online: false, lat: null, lng: null, current_lat: null, current_lng: null })
+        .update({ is_online: false, current_lat: null, current_lng: null })
         .eq('id', driver.id)
         .then();
     }
