@@ -54,15 +54,14 @@ interface DBDriver {
   status: string;
   is_approved: boolean;
   is_online: boolean;
-  is_active: boolean | null;
   rating: number;
   total_rides: number;
   vehicle_license_url: string | null;
   driver_with_car_url: string | null;
   selfie_url: string | null;
   created_at: string;
-  lat: number | null;
-  lng: number | null;
+  current_lat: number | null;
+  current_lng: number | null;
 }
 
 interface DBRide {
@@ -88,7 +87,6 @@ interface DBPassenger {
   avatar_url: string | null;
   rating: number;
   total_rides: number;
-  is_blocked: boolean;
   created_at: string;
 }
 
@@ -181,6 +179,7 @@ export default function AdminApp() {
   const [tab, setTab] = useState<Tab>('overview');
   const [tripsView, setTripsView] = useState<'list' | 'map'>('list');
   const [loaded, setLoaded] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [mapModalTrips, setMapModalTrips] = useState<{ title: string; trips: TripMapData[] } | null>(null);
 
   // Wallet state
@@ -225,7 +224,7 @@ export default function AdminApp() {
     try {
       const { data, error } = await supabase
         .from('drivers')
-        .select('id, name, phone, car_number, car_type, car_model, car_color, car_year, national_id, license_number, status, is_approved, is_online, is_active, rating, total_rides, vehicle_license_url, driver_with_car_url, selfie_url, created_at, lat, lng')
+        .select('id, name, phone, car_number, car_type, car_model, car_color, car_year, national_id, license_number, status, is_approved, is_online, rating, total_rides, vehicle_license_url, driver_with_car_url, selfie_url, created_at, current_lat, current_lng')
         .order('created_at', { ascending: false });
       if (error) throw error;
       if (data) setDbDrivers(data as DBDriver[]);
@@ -247,7 +246,7 @@ export default function AdminApp() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, phone, name, avatar_url, rating, total_rides, is_blocked, created_at')
+        .select('id, phone, name, avatar_url, rating, total_rides, created_at')
         .eq('role', 'customer')
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -313,9 +312,45 @@ export default function AdminApp() {
   }, []);
 
   useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
     (async () => {
+      // Auth guard: verify admin session
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          const saved = localStorage.getItem('fon_auth_session') || localStorage.getItem('fon_user');
+          if (!saved || JSON.parse(saved).role !== 'admin') {
+            router.replace('/auth/admin');
+            return;
+          }
+        } else {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+          if (prof?.role !== 'admin') {
+            const saved = localStorage.getItem('fon_auth_session') || localStorage.getItem('fon_user');
+            if (!saved || JSON.parse(saved).role !== 'admin') {
+              router.replace('/auth/admin');
+              return;
+            }
+          }
+        }
+      } catch {
+        setAuthError('فشل التحقق من الصلاحية - تأكد من تسجيل الدخول');
+        return;
+      }
+
+      setLoaded(true);
       setDbLoading(true);
       setDbError(null);
+
+      // Loading timeout: show error if data doesn't load in 15 seconds
+      timeout = setTimeout(() => {
+        setDbLoading(false);
+        setDbError('استغرق تحميل البيانات وقت طويل - تأكد من اتصالك بالإنترنت');
+      }, 15000);
       await Promise.all([
         loadTopupRequests(),
         loadDBDrivers(),
@@ -327,6 +362,7 @@ export default function AdminApp() {
         loadDBWalletTxns(),
       ]);
       setDbLoading(false);
+      clearTimeout(timeout);
       supabase
         .from('settings')
         .select('km_price_day')
@@ -335,20 +371,21 @@ export default function AdminApp() {
           if (data?.km_price_day) setKmPriceDay(data.km_price_day);
         });
     })();
-  }, [loadTopupRequests, loadDBDrivers, loadDBRides, loadDBPassengers, loadDBWallets, loadDBPromos, loadDBPayments, loadDBWalletTxns]);
+    return () => clearTimeout(timeout);
+  }, [loadTopupRequests, loadDBDrivers, loadDBRides, loadDBPassengers, loadDBWallets, loadDBPromos, loadDBPayments, loadDBWalletTxns, router]);
 
   const pendingDrivers = useMemo(() => dbDrivers.filter((d) => d.status === 'pending_approval'), [dbDrivers]);
   const availableDrivers = useMemo(() => dbDrivers.filter((d) => d.status !== 'pending_approval'), [dbDrivers]);
 
   const liveMapMarkers: LiveDriverMarker[] = useMemo(() => {
     return availableDrivers
-      .filter((d) => d.lat != null && d.lng != null)
+      .filter((d) => d.current_lat != null && d.current_lng != null)
       .map((d) => ({
         id: d.id,
         name: d.name,
         phone: d.phone,
-        lat: d.lat!,
-        lng: d.lng!,
+        lat: d.current_lat!,
+        lng: d.current_lng!,
         is_online: d.is_online,
         car_number: d.car_number,
         rating: d.rating,
@@ -371,7 +408,7 @@ export default function AdminApp() {
     try {
       const { error } = await supabase
         .from('drivers')
-        .update({ status: 'available', is_approved: true, is_active: true })
+        .update({ status: 'available', is_approved: true })
         .eq('id', driverId);
       if (error) throw error;
       toast.success('تمت الموافقة على السائق');
@@ -505,10 +542,10 @@ export default function AdminApp() {
 
   const toggleDriverOnlineDB = async (driverId: string, currentOnline: boolean) => {
     try {
-      const updates: { is_online: boolean; lat?: number | null; lng?: number | null } = { is_online: !currentOnline };
+      const updates: { is_online: boolean; current_lat?: number | null; current_lng?: number | null } = { is_online: !currentOnline };
       if (currentOnline) {
-        updates.lat = null;
-        updates.lng = null;
+        updates.current_lat = null;
+        updates.current_lng = null;
       }
       const { error } = await supabase
         .from('drivers')
@@ -525,7 +562,7 @@ export default function AdminApp() {
     try {
       const { error } = await supabase
         .from('drivers')
-        .update({ is_online: false, lat: null, lng: null })
+        .update({ is_online: false, current_lat: null, current_lng: null })
         .neq('id', '00000000-0000-0000-0000-000000000000');
       if (error) throw error;
       toast.success('تم فصل جميع السائقين');
@@ -646,7 +683,17 @@ export default function AdminApp() {
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(180deg, #0A1931 0%, #162447 100%)' }}>
-        <div className="w-8 h-8 border-2 border-[#C9A86A] border-t-transparent rounded-full animate-spin" />
+        {authError ? (
+          <div className="text-center max-w-sm px-6">
+            <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+            <p className="text-sm text-red-300 mb-4">{authError}</p>
+            <button onClick={() => router.push('/auth/admin')} className="px-5 py-2.5 text-sm font-bold rounded-xl border border-red-400/30 text-red-400 hover:bg-red-400/10 transition">
+              العودة لصفحة الدخول
+            </button>
+          </div>
+        ) : (
+          <div className="w-8 h-8 border-2 border-[#C9A86A] border-t-transparent rounded-full animate-spin" />
+        )}
       </div>
     );
   }
@@ -1184,10 +1231,8 @@ export default function AdminApp() {
                             </span>
                           </td>
                           <td className="p-3 text-center">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                              p.is_blocked ? 'bg-red-500/15 text-red-400 border-red-500/30' : 'bg-green-500/15 text-green-400 border-green-500/30'
-                            }`}>
-                              {p.is_blocked ? 'محظور' : 'فعال'}
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-green-500/15 text-green-400 border-green-500/30">
+                              فعال
                             </span>
                           </td>
                         </tr>
