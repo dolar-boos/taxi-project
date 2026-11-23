@@ -113,7 +113,7 @@ interface DBPromo {
   created_at: string;
 }
 
-type Tab = 'overview' | 'users' | 'drivers' | 'trips' | 'finance' | 'settings';
+type Tab = 'overview' | 'users' | 'drivers' | 'trips' | 'finance' | 'settings' | 'live' | 'wallets' | 'topups' | 'discounts' | 'passengers';
 
 interface TopupRequest {
   id: string;
@@ -127,6 +127,7 @@ interface TopupRequest {
   source_account: string | null;
   company_account: string | null;
   user_role: string | null;
+  type?: string;
 }
 
 // --- Helpers ---
@@ -1318,8 +1319,8 @@ export default function AdminApp() {
           </div>
         )}
 
-        {/* REMOVED OLD TABS START */}
-        {false && tab === 'live' && (
+        {/* Live Control Tab */}
+        {tab === 'live' && (
           <div className="animate-fade-in space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
