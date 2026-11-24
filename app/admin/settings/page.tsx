@@ -1252,6 +1252,135 @@ export default function AdminSettingsPage() {
             )}
           </div>
         )}
+
+        {tab === 'contracts' && (
+          <div className="space-y-5 animate-fade-in">
+            {/* Default admin percentage */}
+            <div className="rounded-2xl border border-[#C9A86A]/15 p-5 space-y-4" style={cardStyle}>
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <FileText className="w-4 h-4" />
+                النسبة الافتراضية للإدارة
+              </h3>
+              <p className="text-xs" style={{ color: goldDark }}>
+                هذه النسبة تطبق على السائقين اللي ما عندهم عقد مخصص. السائق الجديد يشوفها قبل ما يبلش التسجيل.
+              </p>
+              <div className="flex items-center gap-4">
+                <input
+                  type="range"
+                  min={10}
+                  max={40}
+                  value={defaultAdminPct}
+                  onChange={(e) => setDefaultAdminPct(parseInt(e.target.value))}
+                  className="flex-1 accent-[#C9A86A]"
+                />
+                <div className="text-center min-w-[80px]">
+                  <span className="text-lg font-bold" style={{ color: lightGold }}>{defaultAdminPct}%</span>
+                  <span className="text-xs block" style={{ color: goldDark }}>إدارة / {100 - defaultAdminPct}% سائق</span>
+                </div>
+              </div>
+              <button
+                onClick={saveDefaultPercentage}
+                disabled={contractSaving}
+                className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition hover:scale-[1.01] disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)', color: '#0A1931' }}
+              >
+                {contractSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                حفظ النسبة
+              </button>
+            </div>
+
+            {/* Create contract */}
+            <div className="rounded-2xl border border-[#C9A86A]/15 p-5 space-y-4" style={cardStyle}>
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <Plus className="w-4 h-4" />
+                إنشاء عقد لسائق
+              </h3>
+              <div>
+                <label className={labelClass} style={{ color: goldDark }}>رقم هاتف السائق</label>
+                <input
+                  type="tel"
+                  value={newContractPhone}
+                  onChange={(e) => setNewContractPhone(e.target.value)}
+                  placeholder="07XXXXXXXX"
+                  className={inputClass}
+                  style={{ color: lightGold }}
+                  dir="ltr"
+                />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="text-xs" style={{ color: goldDark }}>نسبة الإدارة</label>
+                <input
+                  type="range"
+                  min={10}
+                  max={40}
+                  value={newContractPct}
+                  onChange={(e) => setNewContractPct(parseInt(e.target.value))}
+                  className="flex-1 accent-[#C9A86A]"
+                />
+                <span className="text-sm font-bold" style={{ color: lightGold }}>{newContractPct}% / {100 - newContractPct}%</span>
+              </div>
+              <button
+                onClick={createContract}
+                disabled={contractSaving || !newContractPhone.trim()}
+                className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition hover:scale-[1.01] disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)', color: '#0A1931' }}
+              >
+                {contractSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                إنشاء العقد
+              </button>
+            </div>
+
+            {/* Existing contracts list */}
+            <div className="rounded-2xl border border-[#C9A86A]/15 p-5 space-y-3" style={cardStyle}>
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                <FileText className="w-4 h-4" />
+                العقود الحالية ({contracts.length})
+              </h3>
+              {contracts.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: goldDark }}>ما في عقود بعد</p>
+              ) : (
+                <div className="space-y-2">
+                  {contracts.map((c) => (
+                    <div key={c.id} className="rounded-xl border border-[#C9A86A]/10 p-3 space-y-2" style={{ background: 'rgba(10,25,49,0.4)' }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold" style={{ color: lightGold }} dir="ltr">{c.driver_phone}</span>
+                        <button
+                          onClick={() => toggleContract(c.id, c.is_active)}
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition flex-shrink-0 ${
+                            c.is_active
+                              ? 'bg-green-500/15 text-green-400 border-green-500/30'
+                              : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
+                          }`}
+                        >
+                          {c.is_active ? 'فعال' : 'متوقف'}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px]" style={{ color: goldDark }}>نسبة الإدارة</span>
+                        <input
+                          type="range"
+                          min={10}
+                          max={40}
+                          value={c.admin_percentage}
+                          onChange={(e) => updateContractPct(c.id, parseInt(e.target.value))}
+                          className="flex-1 accent-[#C9A86A]"
+                        />
+                        <span className="text-xs font-bold" style={{ color: lightGold }}>{c.admin_percentage}% / {c.driver_percentage}%</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px]" style={{ color: goldDark }}>
+                        {c.accepted_at ? (
+                          <span className="text-green-400">وافق السائق: {new Date(c.accepted_at).toLocaleDateString('ar-JO')}</span>
+                        ) : (
+                          <span>بانتظار موافقة السائق</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

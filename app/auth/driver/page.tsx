@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import {
   Car, Phone, Loader2, User, Hash, Calendar, Palette, FileImage,
   CheckCircle2, X, Clock3, Plus, LogOut, Zap, Fuel, Gauge, Crown,
-  Flower2, Users, Upload,
+  Flower2, Users, Upload, FileText,
 } from 'lucide-react';
 import { supabase, type Driver, type CarType } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
@@ -28,12 +28,13 @@ type UploadState = { url: string | null; preview: string | null };
 export default function DriverAuthPage() {
   const router = useRouter();
   const { signIn, session, loading: authLoading, signOut } = useAuth();
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [loading, setLoading] = useState(false);
   const [uploadingField, setUploadingField] = useState<UploadField | null>(null);
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [existingDriver, setExistingDriver] = useState<Driver | null>(null);
+  const [contractInfo, setContractInfo] = useState<{ adminPercentage: number; driverPercentage: number } | null>(null);
   const [form, setForm] = useState({
     name: '', national_id: '', car_number: '', car_type: 'electric' as CarType, car_year: '', car_color: '',
   });
@@ -87,7 +88,28 @@ export default function DriverAuthPage() {
           setStep(4);
         }
       } else {
-        setStep(2);
+        // New driver — check for existing contract or fetch default percentage
+        const { data: existingContract } = await supabase
+          .from('driver_contracts')
+          .select('admin_percentage, driver_percentage')
+          .eq('driver_phone', phone)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (existingContract) {
+          setContractInfo({
+            adminPercentage: Number(existingContract.admin_percentage),
+            driverPercentage: Number(existingContract.driver_percentage),
+          });
+        } else {
+          const { data: ps } = await supabase
+            .from('pricing_settings')
+            .select('default_admin_percentage')
+            .eq('id', 1)
+            .maybeSingle();
+          const adminPct = ps?.default_admin_percentage ? Number(ps.default_admin_percentage) : 20;
+          setContractInfo({ adminPercentage: adminPct, driverPercentage: 100 - adminPct });
+        }
+        setStep(5);
       }
     } catch {
       toast.error('صار خطأ — جرب مرة تانية');
@@ -283,6 +305,7 @@ export default function DriverAuthPage() {
             {step === 2 && 'سجل ككابتن جديد'}
             {step === 3 && 'تأكيد رقم الموبايل'}
             {step === 4 && 'حسابك قيد المراجعة'}
+            {step === 5 && 'اتفاقية العقد'}
           </p>
         </div>
 
@@ -304,6 +327,68 @@ export default function DriverAuthPage() {
               {loading && <Loader2 className="w-5 h-5 animate-spin" />}
               متابعة
             </button>
+          </div>
+        )}
+
+        {/* Step 5: Contract Agreement */}
+        {step === 5 && contractInfo && (
+          <div className="fon-card p-6 space-y-5 max-h-[calc(100vh-220px)] overflow-y-auto">
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-xl fon-gradient-gold flex items-center justify-center mx-auto mb-3">
+                <FileText className="w-7 h-7 text-fon-black" />
+              </div>
+              <h2 className="text-lg font-bold fon-text-gradient-gold">اتفاقية العقد</h2>
+              <p className="text-xs text-fon-gold-dark mt-1">FON TAXI — اتفاقية بين الإدارة والسائق</p>
+            </div>
+
+            <div className="bg-fon-dark rounded-xl p-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between py-2 border-b border-fon-gold/10">
+                <span className="text-fon-gold-dark">نسبة الإدارة</span>
+                <span className="text-lg font-bold text-amber-400">{contractInfo.adminPercentage}%</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b border-fon-gold/10">
+                <span className="text-fon-gold-dark">نسبتك (السائق)</span>
+                <span className="text-lg font-bold text-green-400">{contractInfo.driverPercentage}%</span>
+              </div>
+              <div className="pt-2 space-y-2 text-xs text-fon-gold-light leading-relaxed">
+                <p>• بعد كل رحلة، يتم توزيع الأجرة تلقائياً حسب النسب المذكورة أعلاه.</p>
+                <p>• إذا الدفع كاش: تستلم الأجرة كاملة من الراكب، وتحوّل حصة الإدارة عبر CliQ.</p>
+                <p>• إذا الدفع محفظة: تُضاف حصتك لمحفظتك فوراً، وحصة الإدارة تُضاف لمحفظة الإدارة.</p>
+                <p>• تقدر تحط رقم CliQ / IBAN تبعه بملفك عشان يسهل التحويل.</p>
+                <p>• الإدارة تتحكم بالنسبة ويمكن تعديلها من لوحة التحكم.</p>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setPhone(''); setStep(1); }}
+                className="flex-1 py-3 text-sm font-semibold text-red-400 border border-red-400/30 rounded-lg hover:bg-red-400/10 transition"
+              >
+                غير موافق
+              </button>
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    await supabase
+                      .from('driver_contracts')
+                      .update({ accepted_at: new Date().toISOString() })
+                      .eq('driver_phone', phone)
+                      .eq('is_active', true);
+                    setStep(2);
+                  } catch {
+                    setStep(2);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="flex-1 py-3 fon-btn-gold flex items-center justify-center gap-2 text-sm font-bold"
+              >
+                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                موافق — أكمل التسجيل
+              </button>
+            </div>
           </div>
         )}
 

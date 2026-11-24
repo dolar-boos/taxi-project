@@ -112,7 +112,7 @@ interface DBPromo {
   created_at: string;
 }
 
-type Tab = 'overview' | 'users' | 'drivers' | 'trips' | 'finance' | 'settings' | 'live' | 'wallets' | 'topups' | 'discounts' | 'passengers';
+type Tab = 'overview' | 'users' | 'drivers' | 'trips' | 'finance' | 'settings' | 'live' | 'wallets' | 'topups' | 'discounts' | 'passengers' | 'earnings';
 
 interface TopupRequest {
   id: string;
@@ -221,6 +221,16 @@ export default function AdminApp() {
   const [trackingDriverId, setTrackingDriverId] = useState<string | null>(null);
   const [kmPriceDay, setKmPriceDay] = useState(0.35);
 
+  // Earnings state
+  const [tripEarnings, setTripEarnings] = useState<{
+    id: string; ride_id: string | null; total: number; admin_share: number; driver_share: number;
+    admin_percentage: number; payment_method: string; driver_id: string | null;
+    driver_phone: string | null; customer_phone: string | null; created_at: string;
+  }[]>([]);
+  const [cliqTransfers, setCliqTransfers] = useState<Record<string, boolean>>({});
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [transferLoading, setTransferLoading] = useState<string | null>(null);
+
   const loadDBDrivers = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -299,6 +309,32 @@ export default function AdminApp() {
     } catch { setDbError('فشل تحميل أكواد الخصم'); }
   }, []);
 
+  const loadTripEarnings = useCallback(async () => {
+    setEarningsLoading(true);
+    try {
+      const { data: earnings, error: eErr } = await supabase
+        .from('trip_earnings')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (eErr) throw eErr;
+      setTripEarnings(earnings as typeof tripEarnings);
+
+      const { data: transfers } = await supabase
+        .from('cliq_transfers')
+        .select('trip_earning_id');
+      if (transfers) {
+        const map: Record<string, boolean> = {};
+        (transfers as { trip_earning_id: string }[]).forEach((t) => { map[t.trip_earning_id] = true; });
+        setCliqTransfers(map);
+      }
+    } catch {
+      setDbError('فشل تحميل الأرباح');
+    } finally {
+      setEarningsLoading(false);
+    }
+  }, []);
+
   const loadTopupRequests = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -361,6 +397,7 @@ export default function AdminApp() {
         loadDBPromos(),
         loadDBPayments(),
         loadDBWalletTxns(),
+        loadTripEarnings(),
       ]);
       setDbLoading(false);
       clearTimeout(timeout);
