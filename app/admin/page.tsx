@@ -376,7 +376,7 @@ export default function AdminApp() {
   }, [loadTopupRequests, loadDBDrivers, loadDBRides, loadDBPassengers, loadDBWallets, loadDBPromos, loadDBPayments, loadDBWalletTxns, router]);
 
   const pendingDrivers = useMemo(() => dbDrivers.filter((d) => d.status === 'pending_approval'), [dbDrivers]);
-  const availableDrivers = useMemo(() => dbDrivers.filter((d) => d.status !== 'pending_approval'), [dbDrivers]);
+  const availableDrivers = useMemo(() => dbDrivers.filter((d) => d.status === 'approved'), [dbDrivers]);
 
   const liveMapMarkers: LiveDriverMarker[] = useMemo(() => {
     return availableDrivers
