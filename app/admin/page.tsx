@@ -56,6 +56,7 @@ interface DBDriver {
   is_online: boolean;
   rating: number;
   total_rides: number;
+  driver_license_url: string | null;
   vehicle_license_url: string | null;
   driver_with_car_url: string | null;
   selfie_url: string | null;
@@ -224,7 +225,7 @@ export default function AdminApp() {
     try {
       const { data, error } = await supabase
         .from('drivers')
-        .select('id, name, phone, car_number, car_type, car_model, car_color, car_year, national_id, license_number, status, is_approved, is_online, rating, total_rides, vehicle_license_url, driver_with_car_url, selfie_url, created_at, current_lat, current_lng')
+        .select('id, name, phone, car_number, car_type, car_model, car_color, car_year, national_id, license_number, status, is_approved, is_online, rating, total_rides, driver_license_url, vehicle_license_url, driver_with_car_url, selfie_url, created_at, current_lat, current_lng')
         .order('created_at', { ascending: false });
       if (error) throw error;
       if (data) setDbDrivers(data as DBDriver[]);
@@ -408,7 +409,7 @@ export default function AdminApp() {
     try {
       const { error } = await supabase
         .from('drivers')
-        .update({ status: 'available', is_approved: true })
+        .update({ status: 'approved', is_approved: true })
         .eq('id', driverId);
       if (error) throw error;
       toast.success('تمت الموافقة على السائق');
@@ -2022,9 +2023,10 @@ export default function AdminApp() {
             <h3 className="text-sm font-bold mb-3 flex items-center gap-2" style={{ color: goldColor }}>
               <FileImage className="w-4 h-4" /> الصور والمستندات
             </h3>
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
               {[
                 { label: 'صورة شخصية', url: selectedDBDriver.selfie_url },
+                { label: 'رخصة السائق', url: selectedDBDriver.driver_license_url },
                 { label: 'رخصة السيارة', url: selectedDBDriver.vehicle_license_url },
                 { label: 'السائق مع السيارة', url: selectedDBDriver.driver_with_car_url },
               ].map((img) => (
