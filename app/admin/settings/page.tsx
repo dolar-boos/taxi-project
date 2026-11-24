@@ -21,11 +21,12 @@ import {
   CheckCircle2,
   XCircle,
   Gift,
+  FileText,
 } from 'lucide-react';
 import { supabase, type CarType, CAR_TYPE_LABELS } from '@/lib/supabase';
 import { CAR_TYPE_PRICING } from '@/lib/pricing';
 
-type SettingsTab = 'pricing' | 'payment' | 'promos';
+type SettingsTab = 'pricing' | 'payment' | 'promos' | 'contracts';
 type PromoSubTab = 'discount' | 'bonus';
 
 interface CarPricingEntry {
@@ -67,6 +68,17 @@ interface WalletBonusRow {
   used_count: number;
   is_active: boolean;
   expires_at: string | null;
+  created_at: string;
+}
+
+interface DriverContractRow {
+  id: string;
+  driver_id: string | null;
+  driver_phone: string;
+  admin_percentage: number;
+  driver_percentage: number;
+  accepted_at: string | null;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -128,6 +140,20 @@ export default function AdminSettingsPage() {
     min_recharge: 0,
     days_valid: 30,
   });
+  const [discountForm, setDiscountForm] = useState({
+    code: '',
+    discount_value: 10,
+    discount_type: 'percent' as 'percent' | 'fixed',
+    applicable_to: 'all' as 'rider' | 'driver' | 'all',
+    max_uses: 50,
+    days_valid: 30,
+  });
+  const [discountSaving, setDiscountSaving] = useState(false);
+  const [contracts, setContracts] = useState<DriverContractRow[]>([]);
+  const [defaultAdminPct, setDefaultAdminPct] = useState(20);
+  const [contractSaving, setContractSaving] = useState(false);
+  const [newContractPhone, setNewContractPhone] = useState('');
+  const [newContractPct, setNewContractPct] = useState(20);
 
   useEffect(() => {
     (async () => {
@@ -165,6 +191,19 @@ export default function AdminSettingsPage() {
           .select('*')
           .order('created_at', { ascending: false });
         if (bc) setBonusCodes(bc as WalletBonusRow[]);
+
+        const { data: ct } = await supabase
+          .from('driver_contracts')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (ct) setContracts(ct as DriverContractRow[]);
+
+        const { data: ps } = await supabase
+          .from('pricing_settings')
+          .select('default_admin_percentage')
+          .eq('id', 1)
+          .maybeSingle();
+        if (ps?.default_admin_percentage) setDefaultAdminPct(Number(ps.default_admin_percentage));
       } catch {
         toast.error('ما زبط تحميل الإعدادات');
       } finally {
@@ -353,6 +392,106 @@ export default function AdminSettingsPage() {
     });
   };
 
+  const createDiscountCode = async () => {
+    setDiscountSaving(true);
+    try {
+      const code = discountForm.code.trim().toUpperCase() || (() => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let c = '';
+        for (let i = 0; i < 8; i++) c += chars[Math.floor(Math.random() * chars.length)];
+        return c;
+      })();
+      const expiry = new Date();
+      expiry.setDate(expiry.getDate() + discountForm.days_valid);
+      const { data, error } = await supabase
+        .from('promo_codes')
+        .insert({
+          code,
+          discount_value: discountForm.discount_value,
+          discount_type: discountForm.discount_type,
+          applicable_to: discountForm.applicable_to,
+          max_uses: discountForm.max_uses,
+          used_count: 0,
+          is_active: true,
+          expiry: expiry.toISOString(),
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      setPromoCodes((prev) => [data as PromoCodeRow, ...prev]);
+      setDiscountForm({ code: '', discount_value: 10, discount_type: 'percent', applicable_to: 'all', max_uses: 50, days_valid: 30 });
+      toast.success(`تم إنشاء كود الخصم: ${code}`);
+    } catch {
+      toast.error('ما زبط إنشاء كود الخصم');
+    } finally {
+      setDiscountSaving(false);
+    }
+  };
+
+  const saveDefaultPercentage = async () => {
+    setContractSaving(true);
+    try {
+      const { error } = await supabase
+        .from('pricing_settings')
+        .update({ default_admin_percentage: defaultAdminPct })
+        .eq('id', 1);
+      if (error) throw error;
+      toast.success('تم حفظ النسبة الافتراضية');
+    } catch {
+      toast.error('ما زبط الحفظ');
+    } finally {
+      setContractSaving(false);
+    }
+  };
+
+  const createContract = async () => {
+    if (!newContractPhone.trim()) {
+      toast.error('اكتب رقم هاتف السائق');
+      return;
+    }
+    if (newContractPct < 10 || newContractPct > 40) {
+      toast.error('النسبة بين 10% و 40%');
+      return;
+    }
+    setContractSaving(true);
+    try {
+      const { data, error } = await supabase
+        .from('driver_contracts')
+        .insert({
+          driver_phone: newContractPhone.trim(),
+          admin_percentage: newContractPct,
+          driver_percentage: 100 - newContractPct,
+          is_active: true,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      setContracts((prev) => [data as DriverContractRow, ...prev]);
+      setNewContractPhone('');
+      toast.success('تم إنشاء العقد');
+    } catch {
+      toast.error('ما زبط إنشاء العقد');
+    } finally {
+      setContractSaving(false);
+    }
+  };
+
+  const updateContractPct = async (id: string, newPct: number) => {
+    if (newPct < 10 || newPct > 40) return;
+    const { error } = await supabase
+      .from('driver_contracts')
+      .update({ admin_percentage: newPct, driver_percentage: 100 - newPct })
+      .eq('id', id);
+    if (error) { toast.error('ما زبط التحديث'); return; }
+    setContracts((prev) => prev.map((c) => c.id === id ? { ...c, admin_percentage: newPct, driver_percentage: 100 - newPct } : c));
+  };
+
+  const toggleContract = async (id: string, currentActive: boolean) => {
+    const { error } = await supabase.from('driver_contracts').update({ is_active: !currentActive }).eq('id', id);
+    if (error) { toast.error('ما زبط التحديث'); return; }
+    setContracts((prev) => prev.map((c) => c.id === id ? { ...c, is_active: !currentActive } : c));
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(180deg, #0A1931 0%, #162447 100%)' }}>
@@ -420,6 +559,16 @@ export default function AdminSettingsPage() {
           >
             <Ticket className="w-4 h-4" />
             أكواد الخصم
+          </button>
+          <button
+            onClick={() => setTab('contracts')}
+            className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-lg transition ${
+              tab === 'contracts' ? 'text-[#0A1931]' : 'border border-[#C9A86A]/20 hover:bg-[#C9A86A]/10'
+            }`}
+            style={tab === 'contracts' ? { background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)' } : { color: goldColor }}
+          >
+            <FileText className="w-4 h-4" />
+            العقد / الاتفاقية
           </button>
         </div>
       </div>
@@ -757,22 +906,123 @@ export default function AdminSettingsPage() {
 
             {/* Discount codes sub-tab */}
             {promoSubTab === 'discount' && (
-              <div className="rounded-2xl border border-[#C9A86A]/15 p-5 space-y-4" style={cardStyle}>
-                <div className="flex items-center justify-between">
+              <div className="space-y-4">
+                {/* Create discount code form */}
+                <div className="rounded-2xl border border-[#C9A86A]/15 p-5 space-y-4" style={cardStyle}>
                   <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
-                    <Ticket className="w-4 h-4" />
-                    اكواد الخصم ({promoCodes.length})
+                    <Plus className="w-4 h-4" />
+                    إنشاء كود خصم جديد
                   </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass} style={{ color: goldDark }}>الكود (اتركه فارغ للتوليد التلقائي)</label>
+                      <input
+                        type="text"
+                        value={discountForm.code}
+                        onChange={(e) => setDiscountForm({ ...discountForm, code: e.target.value })}
+                        placeholder="مثال: SUMMER2026"
+                        className={inputClass}
+                        style={{ color: lightGold }}
+                        dir="ltr"
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass} style={{ color: goldDark }}>نوع الخصم</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setDiscountForm({ ...discountForm, discount_type: 'percent' })}
+                          className={`py-2.5 rounded-lg border-2 text-xs font-bold transition ${discountForm.discount_type === 'percent' ? 'border-[#C9A86A] bg-[#C9A86A]/10' : 'border-[#C9A86A]/20'}`}
+                          style={{ color: discountForm.discount_type === 'percent' ? lightGold : goldDark }}
+                        >
+                          نسبة %
+                        </button>
+                        <button
+                          onClick={() => setDiscountForm({ ...discountForm, discount_type: 'fixed' })}
+                          className={`py-2.5 rounded-lg border-2 text-xs font-bold transition ${discountForm.discount_type === 'fixed' ? 'border-[#C9A86A] bg-[#C9A86A]/10' : 'border-[#C9A86A]/20'}`}
+                          style={{ color: discountForm.discount_type === 'fixed' ? lightGold : goldDark }}
+                        >
+                          مبلغ ثابت
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={labelClass} style={{ color: goldDark }}>قيمة الخصم</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={discountForm.discount_value}
+                        onChange={(e) => setDiscountForm({ ...discountForm, discount_value: parseFloat(e.target.value) || 0 })}
+                        className={inputClass}
+                        style={{ color: lightGold }}
+                        dir="ltr"
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass} style={{ color: goldDark }}>المستهدف</label>
+                      <select
+                        value={discountForm.applicable_to}
+                        onChange={(e) => setDiscountForm({ ...discountForm, applicable_to: e.target.value as 'rider' | 'driver' | 'all' })}
+                        className={inputClass}
+                        style={{ color: lightGold }}
+                      >
+                        <option value="all">للجميع</option>
+                        <option value="rider">للراكب</option>
+                        <option value="driver">للسائق</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelClass} style={{ color: goldDark }}>الحد الأقصى للاستخدام</label>
+                      <input
+                        type="number"
+                        value={discountForm.max_uses}
+                        onChange={(e) => setDiscountForm({ ...discountForm, max_uses: parseInt(e.target.value) || 50 })}
+                        className={inputClass}
+                        style={{ color: lightGold }}
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelClass} style={{ color: goldDark }}>مدة الصلاحية (ايام)</label>
+                    <input
+                      type="number"
+                      value={discountForm.days_valid}
+                      onChange={(e) => setDiscountForm({ ...discountForm, days_valid: parseInt(e.target.value) || 30 })}
+                      className={inputClass}
+                      style={{ color: lightGold }}
+                      dir="ltr"
+                    />
+                  </div>
                   <button
-                    onClick={generatePromoCode}
-                    disabled={promoSaving}
-                    className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition hover:scale-[1.02] disabled:opacity-50"
+                    onClick={createDiscountCode}
+                    disabled={discountSaving}
+                    className="w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition hover:scale-[1.01] disabled:opacity-50"
                     style={{ background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)', color: '#0A1931' }}
                   >
-                    {promoSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                    ولّد كود جديد
+                    {discountSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                    إنشاء الكود
                   </button>
                 </div>
+
+                {/* Existing codes list */}
+                <div className="rounded-2xl border border-[#C9A86A]/15 p-5 space-y-4" style={cardStyle}>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: goldColor }}>
+                      <Ticket className="w-4 h-4" />
+                      اكواد الخصم ({promoCodes.length})
+                    </h3>
+                    <button
+                      onClick={generatePromoCode}
+                      disabled={promoSaving}
+                      className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition hover:scale-[1.02] disabled:opacity-50"
+                      style={{ background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)', color: '#0A1931' }}
+                    >
+                      {promoSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      ولّد كود سريع
+                    </button>
+                  </div>
 
                 {promoCodes.length === 0 ? (
                   <p className="text-xs text-center py-6" style={{ color: goldDark }}>ما في اكواد بعد</p>

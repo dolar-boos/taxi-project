@@ -27,9 +27,9 @@ import {
   LogOut,
   Phone,
 } from 'lucide-react';
-import { supabase, type Ride, type Driver, type FuelType, type PromoCode } from '@/lib/supabase';
+import { supabase, type Ride, type Driver, type FuelType, type PromoCode, type WalletBonusCode } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { chargeWalletForRide } from '@/lib/wallet';
+import { chargeWalletForRide, creditWallet, getDriverContract, getDefaultAdminPercentage, recordTripEarnings } from '@/lib/wallet';
 import { calculatePrice, haversineDistance, isNightTime, loadPricingSettings } from '@/lib/pricing';
 import { notifyTaxiArrived } from '@/lib/notifications';
 import { getCurrentLocation, watchLocation, requestLocationPermission, type LocationWatch } from '@/lib/geo-location';
@@ -85,6 +85,8 @@ export default function DriverApp() {
   const [promoBonus, setPromoBonus] = useState(0);
   const [promoCodeData, setPromoCodeData] = useState<PromoCode | null>(null);
   const [promoChecking, setPromoChecking] = useState(false);
+  const [bonusCode, setBonusCode] = useState('');
+  const [bonusChecking, setBonusChecking] = useState(false);
   const [broadcasts, setBroadcasts] = useState<{ id: string; message: string; created_at: string }[]>([]);
   const [showBroadcast, setShowBroadcast] = useState(true);
   const [showTopup, setShowTopup] = useState(false);
@@ -104,6 +106,8 @@ export default function DriverApp() {
     distance: number;
     price: number;
     routePoints: number[][];
+    driverShare: number;
+    adminShare: number;
   } | null>(null);
 
   // Load driver from auth session, set online, and start GPS tracking on login
@@ -409,13 +413,25 @@ export default function DriverApp() {
   }, [driver]);
 
   const checkCaptainPromo = async () => {
-    if (!promoCode.trim()) return;
+    const trimmedCode = promoCode.trim().toUpperCase();
+    if (!trimmedCode || !driver) return;
     setPromoChecking(true);
     try {
+      const { data: alreadyUsed } = await supabase
+        .from('used_codes')
+        .select('id')
+        .eq('code', trimmedCode)
+        .eq('phone', driver.phone)
+        .maybeSingle();
+      if (alreadyUsed) {
+        toast.error('استخدمت هذا الكود من قبل');
+        return;
+      }
+
       const { data } = await supabase
         .from('promo_codes')
         .select('*')
-        .eq('code', promoCode.trim().toUpperCase())
+        .eq('code', trimmedCode)
         .maybeSingle();
       if (!data) {
         toast.error('كود غير صحيح');
@@ -444,17 +460,110 @@ export default function DriverApp() {
         toast.error('تم استخدام الكود الحد الأقصى');
         return;
       }
-      setPromoCodeData(promo);
-      setPromoBonus(promo.discount_value);
-      if (promo.discount_type === 'percent') {
-        toast.success(`بونص ${promo.discount_value}% مطبق`);
-      } else {
-        toast.success(`بونص ${promo.discount_value} د.أ مطبق`);
+
+      const bonusAmount = promo.discount_type === 'percent'
+        ? Math.round(walletBalance * promo.discount_value / 100 * 100) / 100
+        : promo.discount_value;
+
+      const result = await creditWallet(driver.phone, bonusAmount, 'bonus', `promo_code:${trimmedCode}`);
+      if (!result.success) {
+        toast.error(result.error || 'ما زبط إضافة البونص');
+        return;
       }
+      setWalletBalance(result.newBalance);
+
+      await supabase.from('used_codes').insert({
+        code_type: 'discount',
+        code: trimmedCode,
+        phone: driver.phone,
+      });
+
+      await supabase
+        .from('promo_codes')
+        .update({ used_count: promo.used_count + 1 })
+        .eq('id', promo.id);
+
+      setPromoCode('');
+      toast.success(`تم إضافة بونص ${bonusAmount.toFixed(2)} د.أ لمحفظتك! رصيدك: ${result.newBalance.toFixed(2)} د.أ`);
     } catch {
       toast.error('ما زبط التحقق');
     } finally {
       setPromoChecking(false);
+    }
+  };
+
+  const checkCaptainBonusCode = async () => {
+    const trimmedCode = bonusCode.trim().toUpperCase();
+    if (!trimmedCode || !driver) return;
+    setBonusChecking(true);
+    try {
+      const { data: alreadyUsed } = await supabase
+        .from('used_codes')
+        .select('id')
+        .eq('code', trimmedCode)
+        .eq('phone', driver.phone)
+        .maybeSingle();
+      if (alreadyUsed) {
+        toast.error('استخدمت هذا الكود من قبل');
+        return;
+      }
+
+      const { data } = await supabase
+        .from('wallet_bonus_codes')
+        .select('*')
+        .eq('code', trimmedCode)
+        .maybeSingle();
+      if (!data) {
+        toast.error('كود غير صحيح');
+        return;
+      }
+      const bonus = data as WalletBonusCode;
+      if (!bonus.is_active) {
+        toast.error('هذا الكود معطل');
+        return;
+      }
+      if (bonus.expires_at && new Date(bonus.expires_at) < new Date()) {
+        toast.error('انتهت صلاحية الكود');
+        return;
+      }
+      if (bonus.used_count >= bonus.max_uses) {
+        toast.error('تم استخدام الكود الحد الأقصى');
+        return;
+      }
+
+      const bonusAmount = bonus.bonus_type === 'percent'
+        ? Math.round(walletBalance * bonus.bonus_value / 100 * 100) / 100
+        : bonus.bonus_value;
+
+      if (bonusAmount <= 0) {
+        toast.error('البونص صفر');
+        return;
+      }
+
+      const result = await creditWallet(driver.phone, bonusAmount, 'bonus', `bonus_code:${trimmedCode}`);
+      if (!result.success) {
+        toast.error(result.error || 'ما زبط إضافة البونص');
+        return;
+      }
+      setWalletBalance(result.newBalance);
+
+      await supabase.from('used_codes').insert({
+        code_type: 'bonus',
+        code: trimmedCode,
+        phone: driver.phone,
+      });
+
+      await supabase
+        .from('wallet_bonus_codes')
+        .update({ used_count: bonus.used_count + 1 })
+        .eq('id', bonus.id);
+
+      setBonusCode('');
+      toast.success(`تم إضافة بونص ${bonusAmount.toFixed(2)} د.أ لمحفظتك! رصيدك: ${result.newBalance.toFixed(2)} د.أ`);
+    } catch {
+      toast.error('ما زبط التحقق من كود البونص');
+    } finally {
+      setBonusChecking(false);
     }
   };
 
@@ -653,6 +762,47 @@ export default function DriverApp() {
         });
       }
 
+      let adminPct = 20;
+      let driverPct = 80;
+      if (driver?.phone) {
+        const contract = await getDriverContract(driver.phone);
+        if (contract) {
+          adminPct = contract.adminPercentage;
+          driverPct = contract.driverPercentage;
+        } else {
+          adminPct = await getDefaultAdminPercentage();
+          driverPct = 100 - adminPct;
+        }
+      }
+
+      const payMethod = (ride.payment_method === 'wallet' ? 'wallet' : 'cash') as 'cash' | 'wallet';
+      const { adminShare, driverShare } = await recordTripEarnings(
+        rideId,
+        finalFare,
+        adminPct,
+        driverPct,
+        payMethod,
+        driver?.id ?? null,
+        driver?.phone ?? null,
+        ride.customer_phone ?? null,
+      );
+
+      if (payMethod === 'wallet' && finalFare > 0) {
+        if (driverShare > 0 && driver?.phone) {
+          await creditWallet(driver.phone, driverShare, 'bonus', `ride_earning:${rideId}`);
+          setWalletBalance((prev) => prev + driverShare);
+        }
+        const { data: adminSettings } = await supabase
+          .from('payment_settings')
+          .select('cliq_alias, wallet_number')
+          .eq('id', 1)
+          .maybeSingle();
+        const adminPhone = adminSettings?.wallet_number || adminSettings?.cliq_alias || '';
+        if (adminShare > 0 && adminPhone) {
+          await creditWallet(adminPhone, adminShare, 'bonus', `ride_earning:${rideId}`);
+        }
+      }
+
       if (driver) {
         await supabase
           .from('drivers')
@@ -665,6 +815,8 @@ export default function DriverApp() {
         distance: roundedDistance,
         price: finalFare,
         routePoints: finalRoutePoints,
+        driverShare,
+        adminShare,
       });
 
       activeRideIdRef.current = null;
@@ -673,7 +825,7 @@ export default function DriverApp() {
       routePointsRef.current = [];
 
       setMyRides((prev) => prev.map((r) => (r.id === rideId ? { ...r, status: 'completed', price: finalFare, distance_km: roundedDistance } : r)));
-      toast.success(`خلصت الرحلة - الأجرة ${finalFare.toFixed(2)} د.أ`);
+      toast.success(`خلصت الرحلة — الأجرة ${finalFare.toFixed(2)} د.أ | حصتك ${driverShare.toFixed(2)} د.أ | حصة الإدارة ${adminShare.toFixed(2)} د.أ`);
     } catch {
       toast.error('ما زبط تخليص الرحلة');
     } finally {
@@ -1166,7 +1318,7 @@ export default function DriverApp() {
             <div className="fon-card p-5 space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-fon-gold">
                 <Tag className="w-4 h-4" />
-                كود البونص
+                كود بونص السائق
               </div>
               <div className="flex gap-2">
                 <input
@@ -1181,17 +1333,26 @@ export default function DriverApp() {
                   disabled={promoChecking || !promoCode.trim()}
                   className="px-4 py-2.5 text-sm font-semibold text-fon-black bg-fon-gold rounded-lg hover:bg-fon-gold-light transition disabled:opacity-50"
                 >
-                  تطبيق
+                  {promoChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'تطبيق'}
                 </button>
               </div>
-              {promoBonus > 0 && promoCodeData && (
-                <div className="flex items-center gap-2 text-xs text-green-400">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {promoCodeData.discount_type === 'percent'
-                    ? `بونص ${promoBonus}% مطبق على مشاويرك`
-                    : `بونص ${promoBonus} د.أ مطبق على مشاويرك`}
-                </div>
-              )}
+
+              <div className="flex gap-2 pt-2 border-t border-fon-gold/10">
+                <input
+                  type="text"
+                  value={bonusCode}
+                  onChange={(e) => setBonusCode(e.target.value)}
+                  placeholder="كود بونص المحفظة"
+                  className="fon-input flex-1 px-4 py-2.5 text-sm"
+                />
+                <button
+                  onClick={checkCaptainBonusCode}
+                  disabled={bonusChecking || !bonusCode.trim()}
+                  className="px-4 py-2.5 text-sm font-semibold text-fon-black bg-fon-gold rounded-lg hover:bg-fon-gold-light transition disabled:opacity-50"
+                >
+                  {bonusChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'استخدم'}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1224,6 +1385,24 @@ export default function DriverApp() {
                 <div className="text-[10px] text-fon-gold-dark">سعر الرحلة</div>
                 <div className="text-lg font-bold text-green-400">{completedRideSummary.price.toFixed(2)} د.أ</div>
               </div>
+            </div>
+
+            <div className="bg-fon-dark rounded-xl p-4 space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-fon-gold-dark">المبلغ الكلي</span>
+                <span className="text-fon-gold-light font-bold">{completedRideSummary.price.toFixed(2)} د.أ</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-fon-gold-dark">حصتك (السائق)</span>
+                <span className="text-green-400 font-bold">{completedRideSummary.driverShare.toFixed(2)} د.أ</span>
+              </div>
+              <div className="flex justify-between text-xs pt-1 border-t border-fon-gold/10">
+                <span className="text-fon-gold-dark">حصة الإدارة</span>
+                <span className="text-amber-400 font-bold">{completedRideSummary.adminShare.toFixed(2)} د.أ</span>
+              </div>
+              <p className="text-[10px] text-fon-gold-dark pt-1">
+                {completedRideSummary.ride.payment_method === 'wallet' ? 'الدفع: محفظة — حصتك أُضيفت لمحفظتك' : 'الدفع: كاش — استلم الأجرة من الراكب'}
+              </p>
             </div>
 
             <button
