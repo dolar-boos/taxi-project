@@ -100,6 +100,8 @@ export interface Driver {
   total_rides: number;
   per_km_price: number | null;
   is_fake?: boolean;
+  cliq_number?: string | null;
+  iban_number?: string | null;
 }
 
 export interface Settings {
@@ -276,4 +278,49 @@ export interface Broadcast {
   message: string;
   target: 'customers' | 'captains';
   created_at: string;
+}
+
+export interface DriverContract {
+  id: string;
+  driver_id: string | null;
+  driver_phone: string;
+  admin_percentage: number;
+  driver_percentage: number;
+  accepted_at: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TripEarning {
+  id: string;
+  ride_id: string | null;
+  total: number;
+  admin_share: number;
+  driver_share: number;
+  admin_percentage: number;
+  payment_method: 'cash' | 'wallet';
+  driver_id: string | null;
+  driver_phone: string | null;
+  customer_phone: string | null;
+  created_at: string;
+}
+
+export interface CliqTransfer {
+  id: string;
+  trip_earning_id: string;
+  ride_id: string | null;
+  amount: number;
+  driver_cliq_number: string | null;
+  admin_cliq_number: string | null;
+  status: 'pending' | 'completed';
+  transferred_at: string;
+}
+
+export interface UsedCode {
+  id: string;
+  code_type: 'discount' | 'bonus';
+  code: string;
+  phone: string;
+  user_id: string | null;
+  used_at: string;
 }

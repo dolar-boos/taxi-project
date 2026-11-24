@@ -29,7 +29,7 @@ import { supabase, type Broadcast, type PromoCode, type Ride, CAR_TYPE_LABELS, t
 import { useAuth } from '@/lib/auth-context';
 import { reverseGeocode, searchAddress, type SearchResult } from '@/lib/geo';
 import { haversineDistance, calculatePrice, isNightTime, loadPricingSettings, type DBPricingSettings } from '@/lib/pricing';
-import { getWalletBalance } from '@/lib/wallet';
+import { getWalletBalance, creditWallet } from '@/lib/wallet';
 import { enableBackgroundMode, disableBackgroundMode, notifyTaxiArrived } from '@/lib/notifications';
 import type { NearbyCar } from '@/components/fon-map';
 import LogoutButton from '@/app/components/LogoutButton';
@@ -69,7 +69,11 @@ export default function CustomerApp() {
   const [walletBalance, setWalletBalance] = useState(0);
   const [promoCode, setPromoCode] = useState('');
   const [promoDiscount, setPromoDiscount] = useState(0);
+  const [promoCodeData, setPromoCodeData] = useState<PromoCode | null>(null);
   const [promoChecking, setPromoChecking] = useState(false);
+  const [bonusCode, setBonusCode] = useState('');
+  const [bonusChecking, setBonusChecking] = useState(false);
+  const [promoBreakdown, setPromoBreakdown] = useState<{ original: number; discount: number; final: number } | null>(null);
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [showBroadcast, setShowBroadcast] = useState(true);
   const [locating, setLocating] = useState(false);
@@ -376,18 +380,35 @@ export default function CustomerApp() {
   }, [currentRide, phone, assignedDriver, router]);
 
   const checkPromo = async () => {
-    if (!promoCode.trim()) return;
+    const trimmedCode = promoCode.trim().toUpperCase();
+    if (!trimmedCode) return;
     setPromoChecking(true);
     try {
+      const { data: alreadyUsed } = await supabase
+        .from('used_codes')
+        .select('id')
+        .eq('code', trimmedCode)
+        .eq('phone', phone)
+        .maybeSingle();
+      if (alreadyUsed) {
+        toast.error('استخدمت هذا الكود من قبل');
+        setPromoDiscount(0);
+        setPromoCodeData(null);
+        setPromoBreakdown(null);
+        return;
+      }
+
       const { data } = await supabase
         .from('promo_codes')
         .select('*')
-        .eq('code', promoCode.trim().toUpperCase())
+        .eq('code', trimmedCode)
         .maybeSingle();
 
       if (!data) {
         toast.error('كود غير صحيح');
         setPromoDiscount(0);
+        setPromoCodeData(null);
+        setPromoBreakdown(null);
         return;
       }
 
@@ -395,11 +416,15 @@ export default function CustomerApp() {
       if (!promo.is_active) {
         toast.error('هذا الكود معطل');
         setPromoDiscount(0);
+        setPromoCodeData(null);
+        setPromoBreakdown(null);
         return;
       }
       if (promo.applicable_to !== 'rider' && promo.applicable_to !== 'all') {
         toast.error('هذا الكود للسائقين فقط');
         setPromoDiscount(0);
+        setPromoCodeData(null);
+        setPromoBreakdown(null);
         return;
       }
       if (promo.expiry && new Date(promo.expiry) < new Date()) {
@@ -411,7 +436,16 @@ export default function CustomerApp() {
         return;
       }
 
+      setPromoCodeData(promo);
       setPromoDiscount(promo.discount_value);
+
+      const originalPrice = tripEstimate?.price ?? 0;
+      const discountAmount = promo.discount_type === 'percent'
+        ? originalPrice * promo.discount_value / 100
+        : Math.min(promo.discount_value, originalPrice);
+      const finalPrice = Math.max(0, originalPrice - discountAmount);
+      setPromoBreakdown({ original: originalPrice, discount: discountAmount, final: finalPrice });
+
       if (promo.discount_type === 'percent') {
         toast.success(`تم تطبيق خصم ${promo.discount_value}%`);
       } else {
@@ -421,6 +455,85 @@ export default function CustomerApp() {
       toast.error('ما زبط التحقق من الكود');
     } finally {
       setPromoChecking(false);
+    }
+  };
+
+  const checkBonusCode = async () => {
+    const trimmedCode = bonusCode.trim().toUpperCase();
+    if (!trimmedCode || !phone) return;
+    setBonusChecking(true);
+    try {
+      const { data: alreadyUsed } = await supabase
+        .from('used_codes')
+        .select('id')
+        .eq('code', trimmedCode)
+        .eq('phone', phone)
+        .maybeSingle();
+      if (alreadyUsed) {
+        toast.error('استخدمت هذا الكود من قبل');
+        return;
+      }
+
+      const { data } = await supabase
+        .from('wallet_bonus_codes')
+        .select('*')
+        .eq('code', trimmedCode)
+        .maybeSingle();
+
+      if (!data) {
+        toast.error('كود غير صحيح');
+        return;
+      }
+
+      const bonus = data as { id: string; code: string; bonus_value: number; bonus_type: string; min_recharge: number; max_uses: number; used_count: number; is_active: boolean; expires_at: string | null };
+
+      if (!bonus.is_active) {
+        toast.error('هذا الكود معطل');
+        return;
+      }
+      if (bonus.expires_at && new Date(bonus.expires_at) < new Date()) {
+        toast.error('انتهت صلاحية الكود');
+        return;
+      }
+      if (bonus.used_count >= bonus.max_uses) {
+        toast.error('تم استخدام الكود الحد الأقصى');
+        return;
+      }
+
+      const bonusAmount = bonus.bonus_type === 'percent'
+        ? Math.round(walletBalance * bonus.bonus_value / 100 * 100) / 100
+        : bonus.bonus_value;
+
+      if (bonusAmount <= 0) {
+        toast.error('البونص صفر — اشحن محفظتك أولًا');
+        return;
+      }
+
+      const result = await creditWallet(phone, bonusAmount, 'bonus', `bonus_code:${trimmedCode}`);
+      if (!result.success) {
+        toast.error(result.error || 'ما زبط إضافة البونص');
+        return;
+      }
+
+      setWalletBalance(result.newBalance);
+
+      await supabase.from('used_codes').insert({
+        code_type: 'bonus',
+        code: trimmedCode,
+        phone,
+      });
+
+      await supabase
+        .from('wallet_bonus_codes')
+        .update({ used_count: bonus.used_count + 1 })
+        .eq('id', bonus.id);
+
+      setBonusCode('');
+      toast.success(`تم إضافة بونص ${bonusAmount.toFixed(2)} د.أ لمحفظتك! رصيدك الجديد: ${result.newBalance.toFixed(2)} د.أ`);
+    } catch {
+      toast.error('ما زبط التحقق من كود البونص');
+    } finally {
+      setBonusChecking(false);
     }
   };
 
@@ -489,18 +602,24 @@ export default function CustomerApp() {
       void enableBackgroundMode();
       toast.success(`تم إرسال الطلب${selectedDriver ? ' ل' + selectedDriver.name : ''}`);
 
-      if (promoDiscount > 0) {
+      if (promoDiscount > 0 && promoCodeData) {
+        const trimmedCode = promoCode.trim().toUpperCase();
         const { data: pc } = await supabase
           .from('promo_codes')
           .select('used_count')
-          .eq('code', promoCode.trim().toUpperCase())
+          .eq('code', trimmedCode)
           .maybeSingle();
         if (pc) {
           await supabase
             .from('promo_codes')
             .update({ used_count: (pc as PromoCode).used_count + 1 })
-            .eq('code', promoCode.trim().toUpperCase());
+            .eq('code', trimmedCode);
         }
+        await supabase.from('used_codes').insert({
+          code_type: 'discount',
+          code: trimmedCode,
+          phone,
+        });
       }
     } catch {
       toast.error('صار خطأ — ما زبط إرسال الطلب');
@@ -927,12 +1046,53 @@ export default function CustomerApp() {
               </button>
             </div>
 
-            {promoDiscount > 0 && (
-              <div className="flex items-center gap-2 text-xs text-green-400">
-                <CheckCircle2 className="w-4 h-4" />
-                خصم {promoDiscount}% مطبق
+            {promoDiscount > 0 && promoCodeData && (
+              <div className="fon-card p-3 space-y-1.5 text-xs">
+                <div className="flex items-center gap-2 text-green-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  {promoCodeData.discount_type === 'percent'
+                    ? `خصم ${promoDiscount}% مطبق`
+                    : `خصم ${promoDiscount} د.أ مطبق`}
+                </div>
+                {promoBreakdown && promoBreakdown.original > 0 && (
+                  <div className="space-y-1 pt-1 border-t border-fon-gold/10">
+                    <div className="flex justify-between text-fon-gold-dark">
+                      <span>المبلغ الرئيسي</span>
+                      <span>{promoBreakdown.original.toFixed(2)} د.أ</span>
+                    </div>
+                    <div className="flex justify-between text-red-400">
+                      <span>الخصم</span>
+                      <span>-{promoBreakdown.discount.toFixed(2)} د.أ</span>
+                    </div>
+                    <div className="flex justify-between text-fon-gold-light font-bold pt-1 border-t border-fon-gold/10">
+                      <span>المبلغ النهائي</span>
+                      <span>{promoBreakdown.final.toFixed(2)} د.أ</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Bonus code (wallet credit) */}
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <Tag className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fon-gold-dark" />
+                <input
+                  type="text"
+                  value={bonusCode}
+                  onChange={(e) => setBonusCode(e.target.value)}
+                  placeholder="كود بونص المحفظة"
+                  className="fon-input w-full pr-10 pl-3 py-2.5 text-sm"
+                />
+              </div>
+              <button
+                onClick={checkBonusCode}
+                disabled={bonusChecking || !bonusCode.trim()}
+                className="px-4 py-2.5 text-sm font-semibold text-fon-black bg-fon-gold rounded-lg hover:bg-fon-gold-light transition disabled:opacity-50"
+              >
+                {bonusChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'استخدم'}
+              </button>
+            </div>
 
             {/* Payment method radio */}
             <div className="grid grid-cols-2 gap-2">
