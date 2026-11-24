@@ -556,7 +556,8 @@ export default function AdminApp() {
       const { error } = await supabase
         .from('drivers')
         .update({ is_approved: true, status: 'approved' })
-        .eq('status', 'suspended');
+        .eq('is_approved', false)
+        .in('status', ['suspended', 'approved', 'rejected']);
       if (error) throw error;
       toast.success('تم تفعيل جميع السائقين المفصولين');
       await loadDBDrivers();
@@ -573,7 +574,7 @@ export default function AdminApp() {
       const { error } = await supabase
         .from('drivers')
         .update({ is_approved: false, status: 'suspended', is_online: false, current_lat: null, current_lng: null })
-        .eq('status', 'approved');
+        .eq('is_approved', true);
       if (error) throw error;
       toast.success('تم فصل جميع السائقين');
       await loadDBDrivers();
@@ -1388,16 +1389,15 @@ export default function AdminApp() {
                       <th className="text-right p-3 font-semibold">الموبايل</th>
                       <th className="text-right p-3 font-semibold">رقم السيارة</th>
                       <th className="text-right p-3 font-semibold">نوع السيارة</th>
-                      <th className="text-center p-3 font-semibold">الاتصال</th>
+                      <th className="text-center p-3 font-semibold">الحالة</th>
                       <th className="text-center p-3 font-semibold">التقييم</th>
                       <th className="text-center p-3 font-semibold">المشاوير</th>
-                      <th className="text-center p-3 font-semibold">التفعيل</th>
                     </tr>
                   </thead>
                   <tbody>
                     {availableDrivers.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="p-6 text-center text-sm" style={{ color: goldDark }}>
+                        <td colSpan={7} className="p-6 text-center text-sm" style={{ color: goldDark }}>
                           ما في سائقين
                         </td>
                       </tr>
@@ -1424,16 +1424,6 @@ export default function AdminApp() {
                           <td className="p-3 text-xs cursor-pointer" dir="ltr" onClick={() => setSelectedDBDriver(d)}>{d.car_number}</td>
                           <td className="p-3 text-xs cursor-pointer" onClick={() => setSelectedDBDriver(d)}>{d.car_type || '-'}</td>
                           <td className="p-3 text-center">
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                              d.is_online ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
-                            }`}>
-                              {d.is_online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                              {d.is_online ? 'متصل' : 'غير متصل'}
-                            </span>
-                          </td>
-                          <td className="p-3 text-center font-bold cursor-pointer" onClick={() => setSelectedDBDriver(d)}>{d.rating.toFixed(1)}</td>
-                          <td className="p-3 text-center font-bold cursor-pointer" onClick={() => setSelectedDBDriver(d)}>{d.total_rides}</td>
-                          <td className="p-3 text-center">
                             <button
                               onClick={(e) => { e.stopPropagation(); toggleDriverActivation(d.id, d.is_approved); }}
                               disabled={driverActionLoading === d.id}
@@ -1441,19 +1431,20 @@ export default function AdminApp() {
                                 d.is_approved
                                   ? 'bg-green-500/15 text-green-400 border-green-500/30 hover:bg-green-500/25'
                                   : 'bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/25'
-                              }`
-                              }
+                              }`}
                             >
                               {driverActionLoading === d.id ? (
                                 <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
                               ) : d.is_approved ? (
-                                <CheckCircle2 className="w-3 h-3" />
+                                <Wifi className="w-3 h-3" />
                               ) : (
-                                <Power className="w-3 h-3" />
+                                <WifiOff className="w-3 h-3" />
                               )}
-                              {d.is_approved ? 'مفعّل' : 'مفصول'}
+                              {d.is_approved ? (d.is_online ? 'متصل' : 'مفعّل') : 'مفصول'}
                             </button>
                           </td>
+                          <td className="p-3 text-center font-bold cursor-pointer" onClick={() => setSelectedDBDriver(d)}>{d.rating.toFixed(1)}</td>
+                          <td className="p-3 text-center font-bold cursor-pointer" onClick={() => setSelectedDBDriver(d)}>{d.total_rides}</td>
                         </tr>
                       ))
                     )}
