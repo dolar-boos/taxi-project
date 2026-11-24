@@ -763,6 +763,7 @@ export default function AdminApp() {
     { id: 'drivers', label: 'السائقين', icon: Users },
     { id: 'trips', label: 'الرحلات', icon: RouteIcon },
     { id: 'finance', label: 'المالية', icon: WalletIcon },
+    { id: 'earnings', label: 'الأرباح', icon: List },
     { id: 'settings', label: 'الإعدادات', icon: SettingsIcon },
   ];
 
@@ -934,6 +935,107 @@ export default function AdminApp() {
               <div className="rounded-2xl border border-[#C9A86A]/15 p-8 text-center" style={cardStyle}>
                 <p className="text-sm" style={{ color: goldDark }}>ما في بيانات بعد - الأرقام بتظهر لما يصير فيه نشاط</p>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Earnings Tab */}
+        {tab === 'earnings' && !dbLoading && (
+          <div className="animate-fade-in space-y-4">
+            <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: goldColor }}>
+              <List className="w-5 h-5" /> تقرير الأرباح ({tripEarnings.length})
+            </h2>
+
+            {earningsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-[#C9A86A] border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : tripEarnings.length === 0 ? (
+              <div className="rounded-2xl border border-[#C9A86A]/15 p-6 text-center" style={cardStyle}>
+                <p className="text-sm" style={{ color: goldDark }}>ما في أرباح مسجلة بعد — بتظهر لما يخلص السائقين رحلات</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                    <div className="text-xs mb-1" style={{ color: goldDark }}>إجمالي الأرباح</div>
+                    <div className="text-xl font-bold text-green-400">{tripEarnings.reduce((s, e) => s + e.total, 0).toFixed(2)} د.أ</div>
+                  </div>
+                  <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                    <div className="text-xs mb-1" style={{ color: goldDark }}>حصة الأدمن</div>
+                    <div className="text-xl font-bold" style={{ color: goldColor }}>{tripEarnings.reduce((s, e) => s + e.admin_share, 0).toFixed(2)} د.أ</div>
+                  </div>
+                  <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                    <div className="text-xs mb-1" style={{ color: goldDark }}>حصة السائقين</div>
+                    <div className="text-xl font-bold" style={{ color: lightGold }}>{tripEarnings.reduce((s, e) => s + e.driver_share, 0).toFixed(2)} د.أ</div>
+                  </div>
+                  <div className="rounded-2xl p-4 border border-[#C9A86A]/15" style={cardStyle}>
+                    <div className="text-xs mb-1" style={{ color: goldDark }}>تم التحويل CliQ</div>
+                    <div className="text-xl font-bold" style={{ color: goldColor }}>{tripEarnings.filter((e) => cliqTransfers[e.id]).length}</div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-2xl border border-[#C9A86A]/15" style={cardStyle}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#C9A86A]/15" style={{ color: goldDark }}>
+                        <th className="text-right p-3 font-semibold">الرحلة</th>
+                        <th className="text-center p-3 font-semibold">الإجمالي</th>
+                        <th className="text-center p-3 font-semibold">الأدمن</th>
+                        <th className="text-center p-3 font-semibold">السائق</th>
+                        <th className="text-center p-3 font-semibold">النسبة</th>
+                        <th className="text-center p-3 font-semibold">الطريقة</th>
+                        <th className="text-center p-3 font-semibold">السائق</th>
+                        <th className="text-center p-3 font-semibold">التاريخ</th>
+                        <th className="text-center p-3 font-semibold">CliQ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tripEarnings.map((e) => {
+                        const transferred = !!cliqTransfers[e.id];
+                        return (
+                          <tr key={e.id} className="border-b border-[#C9A86A]/10" style={{ color: lightGold }}>
+                            <td className="p-3 text-xs font-mono" dir="ltr">{e.ride_id ? e.ride_id.slice(0, 8) : '-'}</td>
+                            <td className="p-3 text-center font-bold text-green-400">{e.total.toFixed(2)}</td>
+                            <td className="p-3 text-center font-bold" style={{ color: goldColor }}>{e.admin_share.toFixed(2)}</td>
+                            <td className="p-3 text-center font-bold" style={{ color: lightGold }}>{e.driver_share.toFixed(2)}</td>
+                            <td className="p-3 text-center text-xs" style={{ color: goldDark }}>{e.admin_percentage}%</td>
+                            <td className="p-3 text-center text-xs">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${e.payment_method === 'cash' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' : 'bg-blue-500/15 text-blue-400 border-blue-500/30'}`}>
+                                {e.payment_method === 'cash' ? 'كاش' : 'محفظة'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center text-xs" dir="ltr">{e.driver_phone || '-'}</td>
+                            <td className="p-3 text-center text-xs" style={{ color: goldDark }}>{formatDate(e.created_at)}</td>
+                            <td className="p-3 text-center">
+                              {transferred ? (
+                                <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30 whitespace-nowrap">
+                                  تم التحويل
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleTransferCliq(e.id, e.ride_id, e.driver_share, e.driver_phone)}
+                                  disabled={transferLoading === e.id}
+                                  className="text-[10px] font-bold px-3 py-1.5 rounded-lg text-[#0A1931] border border-[#C9A86A]/30 hover:scale-[1.03] transition disabled:opacity-40 flex items-center gap-1 mx-auto whitespace-nowrap"
+                                  style={{ background: 'linear-gradient(135deg, #C9A86A, #E8D5A3)' }}
+                                >
+                                  {transferLoading === e.id ? (
+                                    <span className="w-3 h-3 border-2 border-[#0A1931] border-t-transparent rounded-full animate-spin" />
+                                  ) : (
+                                    <Shuffle className="w-3 h-3" />
+                                  )}
+                                  تحويل CliQ
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         )}
