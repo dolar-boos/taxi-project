@@ -223,6 +223,7 @@ export default function CustomerApp() {
       const { data } = await supabase
         .from('drivers')
         .select('*')
+        .eq('is_approved', true)
         .not('current_lat', 'is', null)
         .not('current_lng', 'is', null);
 

@@ -128,11 +128,25 @@ export default function DriverApp() {
           setDriver(d);
           if (d.is_approved) {
             // Set online + grab GPS location immediately
-            await supabase
-              .from('drivers')
-              .update({ is_online: true })
-              .eq('id', d.id);
-            setDriver({ ...d, is_online: true });
+            try {
+              const loc = await getCurrentLocation();
+              await supabase
+                .from('drivers')
+                .update({
+                  is_online: true,
+                  current_lat: loc.lat,
+                  current_lng: loc.lng,
+                  location_updated_at: new Date().toISOString(),
+                })
+                .eq('id', d.id);
+              setDriver({ ...d, is_online: true, current_lat: loc.lat, current_lng: loc.lng });
+            } catch {
+              await supabase
+                .from('drivers')
+                .update({ is_online: true })
+                .eq('id', d.id);
+              setDriver({ ...d, is_online: true });
+            }
             startLocationTracking(d.id);
           }
         } else {
@@ -576,29 +590,38 @@ export default function DriverApp() {
   const toggleOnline = async () => {
     if (!driver) return;
     const newStatus = !driver.is_online;
-    const { error } = await supabase
-      .from('drivers')
-      .update({ is_online: newStatus })
-      .eq('id', driver.id);
-    if (error) {
-      toast.error('ما زبط تحديث الحالة');
-      return;
-    }
-    setDriver({ ...driver, is_online: newStatus });
-
     if (newStatus) {
+      try {
+        const loc = await getCurrentLocation();
+        await supabase
+          .from('drivers')
+          .update({ is_online: true, current_lat: loc.lat, current_lng: loc.lng, location_updated_at: new Date().toISOString() })
+          .eq('id', driver.id);
+        setDriver({ ...driver, is_online: true, current_lat: loc.lat, current_lng: loc.lng });
+      } catch {
+        await supabase
+          .from('drivers')
+          .update({ is_online: true })
+          .eq('id', driver.id);
+        setDriver({ ...driver, is_online: true });
+      }
       toast.success('صرت متصل - نحدد موقعك');
       startLocationTracking(driver.id);
     } else {
+      const { error } = await supabase
+        .from('drivers')
+        .update({ is_online: false, current_lat: null, current_lng: null })
+        .eq('id', driver.id);
+      if (error) {
+        toast.error('ما زبط تحديث الحالة');
+        return;
+      }
+      setDriver({ ...driver, is_online: false, current_lat: null, current_lng: null });
       toast.success('صرت غير متصل');
       if (locationWatchRef.current) {
         locationWatchRef.current.clear();
         locationWatchRef.current = null;
       }
-      await supabase
-        .from('drivers')
-        .update({ is_online: false, current_lat: null, current_lng: null })
-        .eq('id', driver.id);
     }
   };
 
