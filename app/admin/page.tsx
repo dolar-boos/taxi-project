@@ -335,6 +335,54 @@ export default function AdminApp() {
     }
   }, []);
 
+  const handleTransferCliq = async (earningId: string, rideId: string | null, amount: number, driverPhone: string | null) => {
+    setTransferLoading(earningId);
+    try {
+      let driverCliq: string | null = null;
+      if (driverPhone) {
+        const { data: drv } = await supabase
+          .from('drivers')
+          .select('cliq_number, iban_number')
+          .eq('phone', driverPhone)
+          .maybeSingle();
+        if (drv) {
+          const d = drv as { cliq_number: string | null; iban_number: string | null };
+          driverCliq = d.cliq_number || d.iban_number;
+        }
+      }
+
+      const { data: ps } = await supabase
+        .from('payment_settings')
+        .select('cliq_alias, admin_cliq_number')
+        .eq('id', 1)
+        .maybeSingle();
+      const adminCliq = ps?.admin_cliq_number || ps?.cliq_alias || null;
+
+      const { error } = await supabase.from('cliq_transfers').insert({
+        trip_earning_id: earningId,
+        ride_id: rideId,
+        amount,
+        driver_cliq_number: driverCliq,
+        admin_cliq_number: adminCliq,
+        status: 'completed',
+      });
+      if (error) {
+        if (error.code === '23505') {
+          toast.error('تم التحويل مسبقاً');
+        } else {
+          throw error;
+        }
+      }
+
+      setCliqTransfers((prev) => ({ ...prev, [earningId]: true }));
+      toast.success(`تم تسجيل التحويل عبر CliQ — ${amount.toFixed(2)} د.أ${driverCliq ? ' لرقم ' + driverCliq : ''}`);
+    } catch {
+      toast.error('ما زبط التحويل');
+    } finally {
+      setTransferLoading(null);
+    }
+  };
+
   const loadTopupRequests = useCallback(async () => {
     try {
       const { data, error } = await supabase
