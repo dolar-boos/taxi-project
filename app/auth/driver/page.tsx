@@ -36,7 +36,7 @@ export default function DriverAuthPage() {
   const [existingDriver, setExistingDriver] = useState<Driver | null>(null);
   const [contractInfo, setContractInfo] = useState<{ adminPercentage: number; driverPercentage: number } | null>(null);
   const [form, setForm] = useState({
-    name: '', national_id: '', car_number: '', car_type: 'electric' as CarType, car_year: '', car_color: '',
+    name: '', national_id: '', license_number: '', car_number: '', car_type: 'electric' as CarType, car_year: '', car_color: '',
   });
   const [driverLicense, setDriverLicense] = useState<UploadState>({ url: null, preview: null });
   const [vehicleLicense, setVehicleLicense] = useState<UploadState>({ url: null, preview: null });
@@ -155,8 +155,8 @@ export default function DriverAuthPage() {
   };
 
   const submitRegistration = async () => {
-    if (!form.name.trim() || !phone.trim() || !form.car_number.trim()) {
-      toast.error('عبّي الاسم، الموبايل، ورقم السيارة'); return;
+    if (!form.name.trim() || !phone.trim() || !form.car_number.trim() || !form.license_number.trim()) {
+      toast.error('عبّي الاسم، الموبايل، رقم الرخصة، ورقم السيارة'); return;
     }
     if (!driverLicense.url || !vehicleLicense.url || !driverWithCar.url || !selfie.url) {
       toast.error('ارفع الصور الأربع المطلوبة'); return;
@@ -183,7 +183,7 @@ export default function DriverAuthPage() {
       const { data, error } = await supabase
         .from('drivers')
         .insert({
-          name: form.name, phone, national_id: form.national_id, car_number: form.car_number,
+          name: form.name, phone, national_id: form.national_id, license_number: form.license_number, car_number: form.car_number,
           car_type: form.car_type, fuel_type: 'diesel', car_year: form.car_year, car_color: form.car_color,
           driver_license_url: driverLicense.url,
           vehicle_license_url: vehicleLicense.url,
@@ -408,6 +408,13 @@ export default function DriverAuthPage() {
               </label>
               <input type="text" value={form.national_id} onChange={(e) => setForm({ ...form, national_id: e.target.value })}
                 placeholder="#" className="fon-input w-full px-4 py-3 text-sm" dir="ltr" />
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-sm font-semibold text-fon-gold mb-2">
+                <FileText className="w-4 h-4" /> رقم رخصة السائق
+              </label>
+              <input type="text" value={form.license_number} onChange={(e) => setForm({ ...form, license_number: e.target.value })}
+                placeholder="رقم رخصة القيادة" className="fon-input w-full px-4 py-3 text-sm" dir="ltr" />
             </div>
             <div>
               <label className="flex items-center gap-2 text-sm font-semibold text-fon-gold mb-2">
